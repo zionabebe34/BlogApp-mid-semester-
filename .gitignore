@@ -27,7 +27,6 @@ dist-ssr
 backend/password.py
 
 # Python / backend
-backend/password.py
 backend/.venv/
 backend/__pycache__/
 *.py[cod]
