@@ -4,13 +4,13 @@ import bcrypt
 import mysql.connector
 from mysql.connector import pooling
 import uuid
-import password  # Import the password variable from password.py
+from password import your_password  # Import the password variable from password.py
 
 app = Flask(__name__)
 CORS(app, origins=['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'], supports_credentials=True)
 
 # Database connection
-your_password = password.your_password
+your_password = your_password  # Use the imported password variable
 
 # A single shared connection is NOT safe across Flask's worker threads:
 # concurrent requests using the same MySQL connection crash the C driver

@@ -1,58 +1,107 @@
 #!/usr/bin/env bash
 #
-# One-command setup + run for BlogApp.
-# - Creates a Python virtual environment and installs backend requirements.
-# - Installs frontend npm dependencies.
-# - Starts the Flask backend and the Vite frontend together.
+# BlogApp — single startup script
 #
 # Usage:
-#   ./start.sh          # install deps (first run) and start both servers
-#   ./start.sh --seed   # also (re)seed the database before starting
+#   ./start.sh              # set up everything and start both servers
+#   ./start.sh --seed       # seed the database, then start both servers
+#   ./start.sh --seed-only  # seed the database only (no servers)
 #
 set -euo pipefail
 
-# Always run from the directory this script lives in (project root)
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT_DIR"
-
 BACKEND_DIR="$ROOT_DIR/backend"
+FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
+PYTHON="$VENV_DIR/bin/python"
 
 SEED=false
-if [ "${1:-}" = "--seed" ]; then
-    SEED=true
-fi
+SEED_ONLY=false
+for arg in "$@"; do
+    case "$arg" in
+        --seed)      SEED=true ;;
+        --seed-only) SEED=true; SEED_ONLY=true ;;
+    esac
+done
 
-# ── 1. Backend: virtualenv + requirements ─────────────────────────────────────
+# ── 1. Python virtualenv + requirements ───────────────────────────────────────
 echo "==> Setting up Python backend..."
 if [ ! -d "$VENV_DIR" ]; then
     echo "    Creating virtual environment..."
     python3 -m venv "$VENV_DIR"
 fi
-
-# Use the venv's python/pip directly (no need to 'activate')
-PYTHON="$VENV_DIR/bin/python"
 "$PYTHON" -m pip install --quiet --upgrade pip
-echo "    Installing backend requirements..."
 "$PYTHON" -m pip install --quiet -r "$BACKEND_DIR/requirements.txt"
+echo "    Backend dependencies ready."
 
-# Optional database seeding
+# ── 2. Create database + tables if they don't exist ───────────────────────────
+echo "==> Initialising database..."
+MYSQL_PWD="$(cd "$BACKEND_DIR" && "$PYTHON" -c "from password import your_password; print(your_password)")"
+mysql -u root -p"$MYSQL_PWD" <<'SQL'
+CREATE DATABASE IF NOT EXISTS homework_5;
+USE homework_5;
+
+CREATE TABLE IF NOT EXISTS users (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    name                VARCHAR(255)        NOT NULL,
+    email               VARCHAR(255)        NOT NULL UNIQUE,
+    password            VARCHAR(255)        NOT NULL,
+    bio                 TEXT,
+    profile_picture_url TEXT,
+    created_at          DATETIME            DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    user_id     INT          NOT NULL UNIQUE,
+    session_id  VARCHAR(255) NOT NULL,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS posts (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    author_id   INT          NOT NULL,
+    title       VARCHAR(255) NOT NULL,
+    body        TEXT         NOT NULL,
+    image_url   TEXT,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS follows (
+    follower_id INT NOT NULL,
+    followed_id INT NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (follower_id, followed_id),
+    FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (followed_id) REFERENCES users(id) ON DELETE CASCADE
+);
+SQL
+echo "    Database ready."
+
+# ── 3. Seed the database ───────────────────────────────────────────────────────
 if [ "$SEED" = true ]; then
-    echo "    Seeding database..."
+    echo "==> Seeding database..."
     (cd "$BACKEND_DIR" && "$PYTHON" seed.py)
+    echo "    Database seeded."
 fi
 
-# ── 2. Frontend: npm dependencies ─────────────────────────────────────────────
+if [ "$SEED_ONLY" = true ]; then
+    echo "==> Done."
+    exit 0
+fi
+
+# ── 4. Frontend npm dependencies ──────────────────────────────────────────────
 echo "==> Setting up frontend..."
-if [ ! -d "$ROOT_DIR/node_modules" ]; then
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
     echo "    Installing npm dependencies..."
-    npm install
+    (cd "$FRONTEND_DIR" && npm install)
 else
     echo "    node_modules already present, skipping npm install."
 fi
 
-# ── 3. Run both servers ───────────────────────────────────────────────────────
-# Kill the backend when this script exits (Ctrl+C), so nothing is left running.
+# ── 5. Start both servers ─────────────────────────────────────────────────────
 cleanup() {
     echo ""
     echo "==> Shutting down..."
@@ -62,12 +111,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "==> Starting Flask backend (http://localhost:5000)..."
+echo "==> Starting Flask backend  →  http://localhost:5000"
 (cd "$BACKEND_DIR" && "$PYTHON" server.py) &
 BACKEND_PID=$!
 
-echo "==> Starting Vite frontend (http://localhost:5173)..."
-echo "    Press Ctrl+C to stop both."
-npm run dev
-
-# If 'npm run dev' exits, the trap above stops the backend too.
+echo "==> Starting Vite frontend  →  http://localhost:5173"
+echo "    Press Ctrl+C to stop both servers."
+(cd "$FRONTEND_DIR" && npm run dev)

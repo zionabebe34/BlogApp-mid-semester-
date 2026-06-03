@@ -39,32 +39,105 @@ people, and browse both a global feed and a personalized "following" feed.
 
 ```
 BlogApp/
-├── start.sh             # One-command setup + run (backend + frontend)
+├── start.sh                 # One-command setup + run (backend + frontend)
 ├── backend/
-│   ├── server.py        # Flask API server (MySQL connection pool)
-│   ├── seed.py          # Seeds users, posts, and random follow relationships
-│   ├── requirements.txt # Python dependencies
-│   ├── run_backend.sh   # Backend-only setup/run helper
-│   └── password.py      # Your local MySQL password (not committed)
-├── src/
-│   ├── App.jsx          # Routes + global auth state
-│   ├── api.js           # Shared fetch helpers
-│   ├── utils/
-│   │   └── timeAgo.js   # Relative "time ago" formatter
-│   ├── components/
-│   │   ├── TopBar.jsx   # Navigation bar with login/logout
-│   │   └── SinglePost.jsx   # Post card (image, time-ago, hover expand)
-│   └── pages/
-│       ├── Feed.jsx          # Global + Following tabs, infinite scroll
-│       ├── NewPost.jsx       # Create a post — rich text + image (protected)
-│       ├── Login.jsx
-│       ├── Signup.jsx
-│       ├── UsersPage.jsx     # All users + debounced search
-│       ├── UserPostsPage.jsx # Public profile (bio, picture, posts, follow)
-│       ├── MyProfilePage.jsx # Own profile (edit bio, followers/following lists)
-│       └── About.jsx
-└── vite.config.js       # Vite proxy to Flask
+│   ├── server.py            # Flask API server (MySQL connection pool)
+│   ├── seed.py              # Seeds users, posts, and random follow relationships
+│   ├── requirements.txt     # Python dependencies
+│   └── password.py          # Your local MySQL password — edit before running
+└── frontend/
+    ├── index.html
+    ├── vite.config.js       # Vite proxy to Flask
+    ├── package.json
+    ├── public/
+    └── src/
+        ├── App.jsx          # Routes + global auth state
+        ├── api.js           # Shared fetch helpers
+        ├── utils/
+        │   └── timeAgo.js   # Relative "time ago" formatter
+        ├── components/
+        │   ├── TopBar.jsx       # Navigation bar with login/logout
+        │   └── SinglePost.jsx   # Post card (image, time-ago, hover expand)
+        └── pages/
+            ├── Feed.jsx          # Global + Following tabs, infinite scroll
+            ├── NewPost.jsx       # Create a post — rich text + image (protected)
+            ├── Login.jsx
+            ├── Signup.jsx
+            ├── UsersPage.jsx     # All users + debounced search
+            ├── UserPostsPage.jsx # Public profile (bio, picture, posts, follow)
+            ├── MyProfilePage.jsx # Own profile (edit bio, followers/following lists)
+            └── About.jsx
 ```
+
+---
+
+## How to Run
+
+### Step 1 — Install MySQL (required before anything else)
+
+The app needs a running MySQL server on your machine. If you don't have it installed:
+
+- **Mac (Homebrew):**
+  ```bash
+  brew install mysql
+  brew services start mysql
+  ```
+- **Windows:** Download the installer from [mysql.com/downloads](https://dev.mysql.com/downloads/installer/)
+- **Linux (Ubuntu/Debian):**
+  ```bash
+  sudo apt install mysql-server
+  sudo systemctl start mysql
+  ```
+
+Make sure MySQL is running and that you know your **root password** before continuing.
+
+---
+
+### Step 2 — Set your MySQL password
+
+Open `backend/password.py` and replace the placeholder with your MySQL root password:
+
+```python
+your_password = 'YOUR_MYSQL_PASSWORD'
+```
+
+---
+
+### Step 3 — First-time setup (run this once)
+
+```bash
+./start.sh --seed
+```
+
+This single command handles everything:
+
+1. Creates a Python virtual environment and installs all backend dependencies
+2. Creates the `homework_5` database and all tables automatically
+3. Seeds the database with sample users, posts, and follow relationships (pulled from JSONPlaceholder)
+4. Installs frontend npm dependencies
+5. Starts **Flask** on `http://localhost:5000` and **Vite** on `http://localhost:5173`
+
+Press **Ctrl+C** to stop both servers.
+
+---
+
+### Step 4 — Every run after the first
+
+```bash
+./start.sh
+```
+
+No need to seed again — your data is already there.
+
+---
+
+### Other options
+
+```bash
+./start.sh --seed-only  # re-seed the database without starting the servers
+```
+
+> The Vite proxy forwards all `/api/*` requests to Flask automatically — no CORS issues.
 
 ---
 
@@ -73,37 +146,43 @@ BlogApp/
 ```sql
 CREATE TABLE users (
     id                  INT AUTO_INCREMENT PRIMARY KEY,
-    name                VARCHAR(255),
-    email               VARCHAR(255) UNIQUE NOT NULL,
-    password            VARCHAR(255) NOT NULL,
+    name                VARCHAR(255)        NOT NULL,
+    email               VARCHAR(255)        NOT NULL UNIQUE,
+    password            VARCHAR(255)        NOT NULL,
     bio                 TEXT,
-    profile_picture_url VARCHAR(512)
-);
-
-CREATE TABLE posts (
-    id         INT AUTO_INCREMENT PRIMARY KEY,
-    title      VARCHAR(255) NOT NULL,
-    body       TEXT NOT NULL,
-    image_url  VARCHAR(512),
-    author_id  INT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (author_id) REFERENCES users(id)
+    profile_picture_url TEXT,
+    created_at          DATETIME            DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE sessions (
-    user_id    INT NOT NULL UNIQUE,
-    session_id VARCHAR(255) NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    user_id     INT          NOT NULL UNIQUE,
+    session_id  VARCHAR(255) NOT NULL,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE posts (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    author_id   INT          NOT NULL,
+    title       VARCHAR(255) NOT NULL,
+    body        TEXT         NOT NULL,
+    image_url   TEXT,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE follows (
     follower_id INT NOT NULL,
     followed_id INT NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (follower_id, followed_id),
-    FOREIGN KEY (follower_id) REFERENCES users(id),
-    FOREIGN KEY (followed_id) REFERENCES users(id)
+    FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (followed_id) REFERENCES users(id) ON DELETE CASCADE
 );
 ```
+
+> You don't need to run this manually — `start.sh` creates all tables automatically.
 
 ---
 
@@ -127,60 +206,6 @@ CREATE TABLE follows (
 | GET    | `/api/users/:id/following`        | No            | List of users this user follows               |
 | POST   | `/api/users/:id/follow`           | Yes           | Follow a user                                 |
 | POST   | `/api/users/:id/unfollow`         | Yes           | Unfollow a user                               |
-
----
-
-## How to Run
-
-### Quick start (recommended)
-
-From the project root:
-
-```bash
-./start.sh          # install deps + run backend and frontend together
-./start.sh --seed   # also (re)seed the database first
-```
-
-This creates a Python virtualenv, installs `backend/requirements.txt`, runs
-`npm install` if needed, then starts **Flask** (`http://localhost:5000`) and
-**Vite** (`http://localhost:5173`) together. Press **Ctrl+C** to stop both.
-
-> Requires MySQL to already be running with the `homework_5` database and a
-> valid `backend/password.py`. The script does not start MySQL.
-
-### Manual steps
-
-**1. Database**
-
-```sql
-CREATE DATABASE homework_5;
-USE homework_5;
--- then create the tables above
-```
-
-Seed with sample users, posts, and random follow relationships:
-
-```bash
-cd backend
-python seed.py
-```
-
-**2. Backend**
-
-```bash
-cd backend
-pip install -r requirements.txt
-python server.py        # http://127.0.0.1:5000
-```
-
-**3. Frontend**
-
-```bash
-npm install
-npm run dev             # http://localhost:5173
-```
-
-> The Vite proxy forwards all `/api/*` requests to Flask automatically — no CORS issues.
 
 ---
 
