@@ -49,6 +49,23 @@ out/
 node_modules/
 /.pnp/
 
+# Backend coverage
+backend/htmlcov/
+.coverage
+
+# Cypress test artifacts
+cypress/screenshots/
+cypress/videos/
+
+# IDE-specific settings
+.vscode/settings.json
+.vscode/launch.json
+
+# OS files
+Thumbs.db
+.AppleDouble
+.LSOverride
+
 # Cache
 .cache/
 .parcel-cache/
