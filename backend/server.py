@@ -10,7 +10,7 @@ from password import your_password  # Import the password variable from password
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+load_dotenv('config.env')
 
 
 
