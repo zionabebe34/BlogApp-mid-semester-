@@ -1,4 +1,5 @@
 import React from 'react';
+import DOMPurify from 'dompurify';
 import { Card, CardContent, CardMedia, Typography, Box, Avatar } from '@mui/material';
 import { timeAgo } from '../utils/timeAgo';
 
@@ -43,7 +44,7 @@ function SinglePostCard({ title, authorName, authorEmail, body, imageUrl, create
             '& a': { color: '#5b6dfa' },
             '& img': { maxWidth: '100%' },
           }}
-          dangerouslySetInnerHTML={{ __html: body || '' }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(body || '') }}
         />
       </CardContent>
     </Card>

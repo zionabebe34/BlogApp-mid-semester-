@@ -218,10 +218,13 @@ def new_post():
         return jsonify({'message': 'Unauthorized'}), 401
 
     data = request.get_json()
-    title = data.get('title')
-    body = data.get('body')
+    title = data.get('title', '').strip()
+    body = data.get('body', '')
     image_url = data.get('image_url')
     author_id = session_row[0]
+
+    if not title or not body:
+        return jsonify({'message': 'Title and body are required'}), 400
 
     cursor.execute(
         "INSERT INTO posts (title, body, image_url, author_id) VALUES (%s, %s, %s, %s)",
@@ -272,42 +275,57 @@ def get_user_posts(user_id):
 def get_user_profile(user_id):
     # Use dictionary=True to easily map DB rows to JSON objects
     cursor = get_db().cursor(dictionary=True)
-    
+
     # 1. Fetch basic user details including bio and profile picture
     cursor.execute("""
-        SELECT id, name, email, bio, profile_picture_url 
+        SELECT id, name, email, bio, profile_picture_url
         FROM users WHERE id = %s
     """, (user_id,))
     user = cursor.fetchone()
-    
+
     # Return 404 if the user does not exist in the database
     if not user:
         cursor.close()
         return jsonify({'message': 'User not found'}), 404
-        
+
     # 2. Count the number of followers for this user
     cursor.execute("SELECT COUNT(*) as count FROM follows WHERE followed_id = %s", (user_id,))
     followers = cursor.fetchone()['count']
-    
+
     # 3. Count how many users this person is following
     cursor.execute("SELECT COUNT(*) as count FROM follows WHERE follower_id = %s", (user_id,))
     following = cursor.fetchone()['count']
-    
-    # 4. Fetch all posts authored by this user, ordered by creation time
+
+    # 4. Check if the currently logged-in user is already following this profile
+    is_following = False
+    session_id = request.cookies.get('session_id')
+    if session_id:
+        cursor.execute("SELECT user_id FROM sessions WHERE session_id = %s", (session_id,))
+        session_row = cursor.fetchone()
+        if session_row:
+            viewer_id = session_row['user_id']
+            cursor.execute(
+                "SELECT 1 FROM follows WHERE follower_id = %s AND followed_id = %s",
+                (viewer_id, user_id)
+            )
+            is_following = cursor.fetchone() is not None
+
+    # 5. Fetch all posts authored by this user, ordered by creation time
     cursor.execute("SELECT id, title, body, image_url, created_at FROM posts WHERE author_id = %s ORDER BY created_at DESC", (user_id,))
     posts = cursor.fetchall()
     # Serialize datetimes so jsonify can handle them
     for post in posts:
         if post['created_at']:
             post['created_at'] = post['created_at'].isoformat()
-    
+
     cursor.close()
-    
+
     # Combine user data, counts, and posts into a single JSON response
     return jsonify({
         **user,
         'followers_count': followers,
         'following_count': following,
+        'is_following': is_following,
         'posts': posts
     }), 200
 
@@ -429,9 +447,12 @@ def search_users():
     search_pattern = f"%{query}%"
     
     cursor.execute("""
-        SELECT id, name, email, profile_picture_url 
-        FROM users 
-        WHERE name LIKE %s OR email LIKE %s
+        SELECT users.id, users.name, users.email, users.profile_picture_url,
+               COUNT(posts.id) as postCount
+        FROM users
+        LEFT JOIN posts ON posts.author_id = users.id
+        WHERE users.name LIKE %s OR users.email LIKE %s
+        GROUP BY users.id, users.name, users.email, users.profile_picture_url
     """, (search_pattern, search_pattern))
     
     results = cursor.fetchall()

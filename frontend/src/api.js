@@ -1,6 +1,6 @@
 
 export const getUserProfile = async (userId) => {
-  const response = await fetch(`/api/users/${userId}/profile`);
+  const response = await fetch(`/api/users/${userId}/profile`, { credentials: 'include' });
   if (!response.ok) throw new Error("Failed to fetch profile");
   return response.json();
 };
@@ -35,12 +35,12 @@ export const getFollowing = async (userId) => {
 };
 
 export const followUser = async (userId) => {
-  const response = await fetch(`/api/users/${userId}/follow`, { method: 'POST' });
+  const response = await fetch(`/api/users/${userId}/follow`, { method: 'POST', credentials: 'include' });
   return response.json();
 };
 
 export const unfollowUser = async (userId) => {
-  const response = await fetch(`/api/users/${userId}/unfollow`, { method: 'POST' });
+  const response = await fetch(`/api/users/${userId}/unfollow`, { method: 'POST', credentials: 'include' });
   return response.json();
 };
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { useNavigate } from 'react-router-dom';
 import { getMe, getUserProfile, updateMyBio, getFollowers, getFollowing } from '../api';
 import { timeAgo } from '../utils/timeAgo';
@@ -155,7 +156,7 @@ function MyProfilePage({ currentUser }) {
             <CardContent>
               <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{post.title}</Typography>
               <Box sx={{ my: 0.5, '& a': { color: '#5b6dfa' } }}
-                dangerouslySetInnerHTML={{ __html: post.body || '' }} />
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(post.body || '') }} />
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 {timeAgo(post.created_at)}
               </Typography>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getUserProfile, followUser, unfollowUser } from '../api';
 import { timeAgo } from '../utils/timeAgo';
@@ -42,14 +43,16 @@ const UserPostsPage = ({ currentUser }) => {
         </div>
       </div>
 
-      <button
-        onClick={handleFollowToggle}
-        disabled={!currentUser}
-        title={!currentUser ? "Log in to follow users" : ""}
-        style={{ marginBottom: 24 }}
-      >
-        {!currentUser ? 'Log in to follow' : profile.is_following ? 'Unfollow' : 'Follow'}
-      </button>
+      {currentUser && String(currentUser.id) === String(userId) ? null : (
+        <button
+          onClick={handleFollowToggle}
+          disabled={!currentUser}
+          title={!currentUser ? "Log in to follow users" : ""}
+          style={{ marginBottom: 24 }}
+        >
+          {!currentUser ? 'Log in to follow' : profile.is_following ? 'Unfollow' : 'Follow'}
+        </button>
+      )}
 
       {profile.posts.map(post => (
         <div key={post.id} style={{ borderBottom: '1px solid #eee', paddingBottom: 12, marginBottom: 12 }}>
@@ -57,7 +60,7 @@ const UserPostsPage = ({ currentUser }) => {
           {post.image_url && (
             <img src={post.image_url} alt={post.title} style={{ maxWidth: '100%', borderRadius: 8, marginBottom: 8 }} />
           )}
-          <div style={{ margin: '0 0 4px' }} dangerouslySetInnerHTML={{ __html: post.body || '' }} />
+          <div style={{ margin: '0 0 4px' }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(post.body || '') }} />
           <small style={{ color: '#999' }}>{timeAgo(post.created_at)}</small>
         </div>
       ))}

@@ -23,6 +23,16 @@ function NewPost() {
     const handlePublish = async (e) => {
         e.preventDefault();
 
+        if (!title.trim()) {
+            alert('Please enter a title for your post.');
+            return;
+        }
+        const strippedBody = body.replace(/<[^>]*>/g, '').trim();
+        if (!strippedBody) {
+            alert('Please write some content for your post.');
+            return;
+        }
+
         // Send new post data to the backend (body is rich-text HTML)
         const response = await fetch('/api/new-post', {
             method: 'POST',
