@@ -6,6 +6,14 @@ from mysql.connector import pooling
 import uuid
 from password import your_password  # Import the password variable from password.py
 
+#import env variables from .env file
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+
+
 app = Flask(__name__)
 CORS(app, origins=['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'], supports_credentials=True)
 
@@ -16,14 +24,15 @@ your_password = your_password  # Use the imported password variable
 # concurrent requests using the same MySQL connection crash the C driver
 # (double-free in SSL_free). Instead we use a pool and hand each request
 # its own connection, returning it when the request ends.
+#configur
 connection_pool = pooling.MySQLConnectionPool(
     pool_name='blogapp_pool',
     pool_size=10,
     pool_reset_session=True,
-    host='localhost',
-    user='root',
-    password=your_password,
-    database='homework_5',
+    host=os.getenv('DB_HOST'),
+    user=os.getenv('DB_USER'),
+    password=os.getenv('DB_PASSWORD'),
+    database=os.getenv('DB_NAME'),
     use_pure=True,  # pure-Python driver: avoids the native SSL_free crash
 )
 
@@ -503,4 +512,4 @@ def feed_following():
     return jsonify(results), 200
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, host='0.0.0.0')
