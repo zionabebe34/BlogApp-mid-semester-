@@ -7,6 +7,24 @@ people, and browse both a global feed and a personalized "following" feed.
 
 ---
 
+## Environment Setup
+
+Before running the backend (or its tests), create a `config.env` file inside
+`backend/` with the following template, then fill in your own local MySQL
+details:
+
+```
+DB_HOST=
+DB_USER=
+DB_PASSWORD=
+DB_NAME=
+```
+
+This file is required for `server.py` — and for `pytest` — to connect to
+your database.
+
+---
+
 ## Tech Stack
 
 | Layer     | Technology                                      |
