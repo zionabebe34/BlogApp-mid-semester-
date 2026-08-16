@@ -141,6 +141,46 @@ No need to seed again — your data is already there.
 
 ---
 
+## Before Running Tests
+
+The backend has two kinds of tests:
+
+- **Unit tests** (`backend/test_auth.py`) — mock the database, no MySQL required.
+- **Integration tests** (`backend/test_auth_integration.py`) — hit a **real MySQL
+  database**, because `server.py` opens a live connection pool the moment it's
+  imported (see `connection_pool = pooling.MySQLConnectionPool(...)` in `server.py`).
+
+If MySQL isn't set up and running with matching credentials, the integration
+tests fail immediately — the import of `server` itself throws a connection
+error before a single test runs.
+
+### Steps
+
+1. Make sure MySQL is installed and running (see **Step 1** above).
+2. Set your MySQL root password in `backend/password.py`:
+   ```python
+   your_password = 'YOUR_MYSQL_PASSWORD'
+   ```
+3. Create the database and tables (you don't need to seed data — the tests
+   create their own users):
+   ```bash
+   ./start.sh --seed-only
+   ```
+4. Install dependencies and run the tests from `backend/`:
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   python3 -m pytest -v
+   ```
+
+   To run just one file:
+   ```bash
+   python3 -m pytest test_auth.py -v              # unit tests, no DB needed
+   python3 -m pytest test_auth_integration.py -v   # integration tests, needs MySQL
+   ```
+
+---
+
 ## Database Schema
 
 ```sql

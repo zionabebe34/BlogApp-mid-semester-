@@ -1,5 +1,11 @@
+import sys
+
 import pytest
 import uuid
+
+# test_auth.py imports 'server' with the MySQL connection pool mocked out.
+# Drop that cached module so this file gets a fresh import with a real pool.
+sys.modules.pop('server', None)
 from server import app, bcrypt
 
 

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 sys.modules.pop('server', None)
 with patch('mysql.connector.pooling.MySQLConnectionPool'):
+    import server as server_module
     from server import app
 
 
@@ -66,7 +67,7 @@ class TestSignup:
         }
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.post('/api/signup', json=data)
 
         #Assert
@@ -94,7 +95,7 @@ class TestLogin:
         }
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.post('/api/login', json=login_data)
 
         #Assert
@@ -111,7 +112,7 @@ class TestLogout:
         client.set_cookie('session_id', 'fake-session-id-123')
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.post('/api/logout')
 
         #Assert
@@ -130,7 +131,7 @@ class TestMe:
         client.set_cookie('session_id', 'fake-session-id')
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/me')
 
         #Assert
@@ -157,7 +158,7 @@ class TestUpdateBio:
         client.set_cookie('session_id', 'fake-session-id')
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.put('/api/me/bio', json={"bio": "My new bio"})
 
         #Assert
@@ -183,7 +184,7 @@ class TestFeed:
         mock_cursor.fetchall.return_value = []
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/feed')
 
         #Assert
@@ -202,7 +203,7 @@ class TestNewPost:
         data = {"title": "Test Post", "body": "Test body", "image_url": ""}
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.post('/api/new-post', json=data)
 
         #Assert
@@ -229,7 +230,7 @@ class TestUsers:
         mock_cursor.fetchall.return_value = [(1, "testuser", "testuser@example.com", 2)]
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/users')
 
         #Assert
@@ -247,7 +248,7 @@ class TestUserPosts:
         mock_cursor.fetchall.return_value = [(1, "My Post", "Post body")]
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/user-posts/1')
 
         #Assert
@@ -269,7 +270,7 @@ class TestUserProfile:
         mock_cursor.fetchall.return_value = []
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/users/1/profile')
 
         #Assert
@@ -284,7 +285,7 @@ class TestUserProfile:
         mock_cursor.fetchone.return_value = None
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/users/999/profile')
 
         #Assert
@@ -301,7 +302,7 @@ class TestFollow:
         client.set_cookie('session_id', 'fake-session-id')
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.post('/api/users/2/follow')
 
         #Assert
@@ -324,7 +325,7 @@ class TestFollow:
         client.set_cookie('session_id', 'fake-session-id')
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.post('/api/users/1/follow')
 
         #Assert
@@ -340,7 +341,7 @@ class TestFollow:
         client.set_cookie('session_id', 'fake-session-id')
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.post('/api/users/2/unfollow')
 
         #Assert
@@ -355,7 +356,7 @@ class TestFollow:
         mock_cursor.fetchall.return_value = [{'id': 2, 'name': 'follower', 'email': 'f@example.com', 'profile_picture_url': ''}]
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/users/1/followers')
 
         #Assert
@@ -369,7 +370,7 @@ class TestFollow:
         mock_cursor.fetchall.return_value = []
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/users/1/following')
 
         #Assert
@@ -385,7 +386,7 @@ class TestSearch:
         mock_cursor.fetchall.return_value = [{'id': 1, 'name': 'testuser', 'email': 'testuser@example.com', 'profile_picture_url': ''}]
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/users/search?q=testuser')
 
         #Assert
@@ -406,12 +407,12 @@ class TestFeedFollowing:
         mock_cursor = MagicMock()
         mock_db = MagicMock()
         mock_db.cursor.return_value = mock_cursor
-        mock_cursor.fetchone.return_value = {'user_id': 1}
+        mock_cursor.fetchone.return_value = (1,)
         mock_cursor.fetchall.return_value = []
         client.set_cookie('session_id', 'fake-session-id')
 
         #Act
-        with patch('server.get_db', return_value=mock_db):
+        with patch.object(server_module, 'get_db', return_value=mock_db):
             response = client.get('/api/feed/following')
 
         #Assert
