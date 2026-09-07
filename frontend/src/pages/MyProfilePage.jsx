@@ -51,7 +51,7 @@ function MyProfilePage({ currentUser }) {
       }
     }
     load();
-  }, [currentUser]);
+  }, [currentUser, navigate]);
 
   const handleSaveBio = async () => {
     setSaving(true);
@@ -74,9 +74,9 @@ function MyProfilePage({ currentUser }) {
   }
 
   return (
-    <Box sx={{ maxWidth: 700, mx: 'auto', mt: 12 }}>
+    <Box sx={{ maxWidth: 700, mx: 'auto', mt: 4 }}>
       {/* ── Profile header ── */}
-      <Card sx={{ borderRadius: 3, boxShadow: 2, mb: 4 }}>
+      <Card sx={{ mb: 4 }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
             <Avatar src={profile.profile_picture_url} alt={profile.name} sx={{ width: 96, height: 96 }} />
@@ -119,7 +119,7 @@ function MyProfilePage({ currentUser }) {
                 variant="contained"
                 onClick={handleSaveBio}
                 disabled={saving}
-                sx={{ background: '#5b6dfa', mr: 1 }}
+                sx={{ mr: 1 }}
               >
                 {saving ? 'Saving...' : 'Save'}
               </Button>
@@ -143,19 +143,19 @@ function MyProfilePage({ currentUser }) {
       </Card>
 
       {/* ── My posts ── */}
-      <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>My Posts</Typography>
+      <Typography variant="h6" sx={{ mb: 2 }}>My Posts</Typography>
       {profile.posts.length === 0 ? (
         <Typography sx={{ color: 'text.secondary' }}>You haven't posted anything yet.</Typography>
       ) : (
         profile.posts.map(post => (
-          <Card key={post.id} sx={{ borderRadius: 2, boxShadow: 1, mb: 2 }}>
+          <Card key={post.id} sx={{ mb: 2 }}>
             {post.image_url && (
               <Box component="img" src={post.image_url} alt={post.title}
-                sx={{ width: '100%', maxHeight: 240, objectFit: 'cover' }} />
+                sx={{ width: '100%', maxHeight: 240, objectFit: 'cover', display: 'block' }} />
             )}
             <CardContent>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{post.title}</Typography>
-              <Box sx={{ my: 0.5, '& a': { color: '#5b6dfa' } }}
+              <Typography variant="h6">{post.title}</Typography>
+              <Box className="post-body" sx={{ my: 0.5, color: 'text.secondary' }}
                 dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(post.body || '') }} />
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 {timeAgo(post.created_at)}

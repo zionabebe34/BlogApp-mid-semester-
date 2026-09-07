@@ -36,7 +36,7 @@ __pycache__/
 .Python
 
 # Environment files
-.env
+config.env
 .env.local
 .env.*.local
 
@@ -98,6 +98,7 @@ yarn-debug.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-#env files
-.env
 
+
+.claude/
+.ua/

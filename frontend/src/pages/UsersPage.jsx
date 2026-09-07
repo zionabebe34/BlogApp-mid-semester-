@@ -1,118 +1,109 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchUsersWithPostCounts } from "../api";
-import { Box, TextField, Button, CircularProgress, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
+import {
+  Box, Typography, TextField, Button, CircularProgress,
+  Card, CardContent, Avatar,
+} from '@mui/material';
+import { fetchUsersWithPostCounts, searchUsers } from '../api';
 
+/**
+ * "Authors" page: every user with their post count, searchable by name
+ * or email. Typing in the search box is debounced (we wait 400ms after
+ * the last keystroke before asking the backend) and results are shown
+ * a few at a time with a "Load More" button.
+ */
 function UsersPage() {
-    const [users, setUsers] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [search, setSearch] = useState("");
-    const [visibleCount, setVisibleCount] = useState(5);
-    const navigate = useNavigate();
-    const debounceTimer = useRef(null);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [visibleCount, setVisibleCount] = useState(5);
+  const navigate = useNavigate();
+  const debounceTimer = useRef(null);
 
-    useEffect(() => {
-        async function fetchData() {
-            setLoading(true);
-            try {
-                const usersWithCounts = await fetchUsersWithPostCounts();
-                setUsers(usersWithCounts);
-            } catch (e) {
-                setUsers([]);
-            }
-            setLoading(false);
-        }
-        fetchData();
-    }, []);
+  // Fetch everyone once on page load
+  useEffect(() => {
+    fetchUsersWithPostCounts()
+      .then(setUsers)
+      .catch(() => setUsers([]))
+      .finally(() => setLoading(false));
+  }, []);
 
-    const handleSearchChange = (e) => {
-        const value = e.target.value;
-        setSearch(value);
-        setVisibleCount(5);
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearch(value);
+    setVisibleCount(5);
 
-        clearTimeout(debounceTimer.current);
-        debounceTimer.current = setTimeout(async () => {
-            if (value.trim() === '') {
-                setLoading(true);
-                try {
-                    const all = await fetchUsersWithPostCounts();
-                    setUsers(all);
-                } catch {
-                    setUsers([]);
-                }
-                setLoading(false);
-            } else {
-                setLoading(true);
-                try {
-                    const res = await fetch(`/api/users/search?q=${encodeURIComponent(value)}`, { credentials: 'include' });
-                    const data = await res.json();
-                    setUsers(data.map(u => ({ ...u, postCount: u.postCount ?? 0 })));
-                } catch {
-                    setUsers([]);
-                }
-                setLoading(false);
-            }
-        }, 400);
-    };
+    // Debounce: restart the 400ms timer on every keystroke
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const results = value.trim() === ''
+          ? await fetchUsersWithPostCounts()          // empty box → show everyone
+          : await searchUsers(value);                 // otherwise → backend search
+        setUsers(results.map(u => ({ ...u, postCount: u.postCount ?? 0 })));
+      } catch {
+        setUsers([]);
+      }
+      setLoading(false);
+    }, 400);
+  };
 
-    const handleLoadMore = () => {
-        setVisibleCount(prev => prev + 10);
-    };
+  return (
+    <Box sx={{ maxWidth: 700, mx: 'auto', mt: 5 }}>
+      <Typography variant="h3" sx={{ textAlign: 'center', mb: 1 }}>
+        Authors
+      </Typography>
+      <Typography sx={{ textAlign: 'center', color: 'text.secondary', mb: 4 }}>
+        Discover the people writing on BlogApp.
+      </Typography>
 
-    return (
-        <Box sx={{ maxWidth: 800, mx: 'auto', mt: 6 }}>
-            <TextField
-                value={search}
-                onChange={handleSearchChange}
-                sx={{ width: '100%', mb: 4 }}
-                id="filled-search"
-                label="Search by name or email..."
-                type="search"
-                variant="filled"
-            />
-            {loading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
-                    <CircularProgress />
-                </Box>
-            ) : (
-                <TableContainer component={Paper} sx={{ borderRadius: 3, boxShadow: 2 }}>
-                    <Table>
-                        <TableHead>
-                            <TableRow sx={{ backgroundColor: '#f6f8fc' }}>
-                                <TableCell sx={{ fontWeight: 'bold', fontSize: 18 }}>Email</TableCell>
-                                <TableCell sx={{ fontWeight: 'bold', fontSize: 18 }}>Posts</TableCell>
-                                <TableCell></TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {users.slice(0, visibleCount).map((user, idx) => (
-                                <TableRow key={user.id} sx={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#f6f8fc' }}>
-                                    <TableCell>{user.email}</TableCell>
-                                    <TableCell>{user.postCount}</TableCell>
-                                    <TableCell>
-                                        <Button
-                                            variant="contained"
-                                            sx={{ borderRadius: 5, background: '#5b6dfa', textTransform: 'none', fontWeight: 600 }}
-                                            onClick={() => navigate(`/user-posts/${user.id}`)}
-                                        >
-                                            See Posts
-                                        </Button>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            )}
-            {!loading && users.length > visibleCount && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-                    <Button variant="contained" onClick={handleLoadMore}>
-                        Load More
-                    </Button>
-                </Box>
-            )}
+      <TextField
+        value={search}
+        onChange={handleSearchChange}
+        fullWidth
+        placeholder="Search by name or email..."
+        type="search"
+        size="small"
+        sx={{ mb: 4, backgroundColor: 'background.paper' }}
+      />
+
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
+          <CircularProgress />
         </Box>
-    );
+      ) : (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {users.slice(0, visibleCount).map((user) => (
+            <Card key={user.id}>
+              <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2, '&:last-child': { pb: 2 } }}>
+                <Avatar src={user.profile_picture_url} alt={user.name} sx={{ width: 48, height: 48 }}>
+                  {(user.name || user.email || '?')[0].toUpperCase()}
+                </Avatar>
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography sx={{ fontWeight: 600 }}>{user.name}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {user.email} · {user.postCount} {user.postCount === 1 ? 'post' : 'posts'}
+                  </Typography>
+                </Box>
+                <Button variant="outlined" onClick={() => navigate(`/user-posts/${user.id}`)}>
+                  View posts
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </Box>
+      )}
+
+      {!loading && users.length > visibleCount && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+          <Button variant="contained" onClick={() => setVisibleCount(prev => prev + 10)}>
+            Load More
+          </Button>
+        </Box>
+      )}
+    </Box>
+  );
 }
 
 export default UsersPage;

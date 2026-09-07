@@ -1,70 +1,126 @@
 import { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { useParams, useNavigate } from 'react-router-dom';
+import {
+  Box, Typography, Button, Card, CardContent, Avatar, CircularProgress,
+} from '@mui/material';
 import { getUserProfile, followUser, unfollowUser } from '../api';
 import { timeAgo } from '../utils/timeAgo';
 
+/**
+ * Public author page: profile header (avatar, bio, follower counts),
+ * a follow/unfollow button, and every post the author has written.
+ */
 const UserPostsPage = ({ currentUser }) => {
   const { userId } = useParams();
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
 
   useEffect(() => {
-    getUserProfile(userId).then(data => setProfile(data));
+    getUserProfile(userId).then(setProfile);
   }, [userId]);
 
+  // Flip the follow state and adjust the follower count locally,
+  // so the UI updates without refetching the whole profile.
   const handleFollowToggle = async () => {
-    if (!currentUser) {
-      alert("You must be logged in to follow users!");
-      return;
-    }
-    if (profile.is_following) {
-      await unfollowUser(userId);
-      setProfile({ ...profile, is_following: false, followers_count: profile.followers_count - 1 });
-    } else {
-      await followUser(userId);
-      setProfile({ ...profile, is_following: true, followers_count: profile.followers_count + 1 });
+    try {
+      if (profile.is_following) {
+        await unfollowUser(userId);
+        setProfile({ ...profile, is_following: false, followers_count: profile.followers_count - 1 });
+      } else {
+        await followUser(userId);
+        setProfile({ ...profile, is_following: true, followers_count: profile.followers_count + 1 });
+      }
+    } catch (err) {
+      alert(err.message);
     }
   };
 
-  if (!profile) return <div>Loading...</div>;
+  if (!profile) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 12 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  const isOwnProfile = currentUser && String(currentUser.id) === String(userId);
 
   return (
-    <div style={{ maxWidth: 700, margin: '80px auto 0', padding: '0 16px' }}>
-      <button onClick={() => navigate(-1)} style={{ marginBottom: 16 }}>← Back</button>
+    <Box sx={{ maxWidth: 700, mx: 'auto', mt: 4 }}>
+      <Button onClick={() => navigate(-1)} sx={{ mb: 2, color: 'text.secondary' }}>
+        ← Back
+      </Button>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
-        <img src={profile.profile_picture_url} alt="Profile" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
-        <div>
-          <h2 style={{ margin: 0 }}>{profile.name}</h2>
-          <p style={{ margin: '4px 0', color: '#666' }}>{profile.bio}</p>
-          <span>Followers: {profile.followers_count}</span> &nbsp;|&nbsp;
-          <span>Following: {profile.following_count}</span>
-        </div>
-      </div>
+      {/* Author header */}
+      <Card sx={{ mb: 4 }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <Avatar
+              src={profile.profile_picture_url}
+              alt={profile.name}
+              sx={{ width: 88, height: 88 }}
+            />
+            <Box sx={{ flexGrow: 1 }}>
+              <Typography variant="h5">{profile.name}</Typography>
+              {profile.bio && (
+                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                  {profile.bio}
+                </Typography>
+              )}
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                <strong>{profile.followers_count}</strong> followers ·{' '}
+                <strong>{profile.following_count}</strong> following
+              </Typography>
+            </Box>
 
-      {currentUser && String(currentUser.id) === String(userId) ? null : (
-        <button
-          onClick={handleFollowToggle}
-          disabled={!currentUser}
-          title={!currentUser ? "Log in to follow users" : ""}
-          style={{ marginBottom: 24 }}
-        >
-          {!currentUser ? 'Log in to follow' : profile.is_following ? 'Unfollow' : 'Follow'}
-        </button>
+            {/* No follow button on your own profile */}
+            {!isOwnProfile && (
+              <Button
+                variant={profile.is_following ? 'outlined' : 'contained'}
+                onClick={handleFollowToggle}
+                disabled={!currentUser}
+                title={!currentUser ? 'Log in to follow authors' : ''}
+              >
+                {!currentUser ? 'Log in to follow' : profile.is_following ? 'Unfollow' : 'Follow'}
+              </Button>
+            )}
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* Author's posts */}
+      <Typography variant="h6" sx={{ mb: 2 }}>
+        Posts by {profile.name}
+      </Typography>
+      {profile.posts.length === 0 ? (
+        <Typography sx={{ color: 'text.secondary' }}>No posts yet.</Typography>
+      ) : (
+        profile.posts.map(post => (
+          <Card key={post.id} sx={{ mb: 2 }}>
+            {post.image_url && (
+              <Box
+                component="img"
+                src={post.image_url}
+                alt={post.title}
+                sx={{ width: '100%', maxHeight: 260, objectFit: 'cover', display: 'block' }}
+              />
+            )}
+            <CardContent>
+              <Typography variant="h6" sx={{ mb: 1 }}>{post.title}</Typography>
+              <Box
+                className="post-body"
+                sx={{ color: 'text.secondary', mb: 1 }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(post.body || '') }}
+              />
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                {timeAgo(post.created_at)}
+              </Typography>
+            </CardContent>
+          </Card>
+        ))
       )}
-
-      {profile.posts.map(post => (
-        <div key={post.id} style={{ borderBottom: '1px solid #eee', paddingBottom: 12, marginBottom: 12 }}>
-          <h3 style={{ margin: '0 0 4px' }}>{post.title}</h3>
-          {post.image_url && (
-            <img src={post.image_url} alt={post.title} style={{ maxWidth: '100%', borderRadius: 8, marginBottom: 8 }} />
-          )}
-          <div style={{ margin: '0 0 4px' }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(post.body || '') }} />
-          <small style={{ color: '#999' }}>{timeAgo(post.created_at)}</small>
-        </div>
-      ))}
-    </div>
+    </Box>
   );
 };
 

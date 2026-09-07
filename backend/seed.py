@@ -26,18 +26,18 @@ cursor = conn.cursor()
 users = requests.get('https://jsonplaceholder.typicode.com/users').json()
 
 for user in users:
-    # 1. שליפת ה-catchPhrase מתוך ה-company לטובת ה-bio
+    # 1. Extract the catchPhrase from company to use as the bio
     bio_text = user.get('company', {}).get('catchPhrase', 'No bio available.')
-    
-    # 2. בניית כתובת תמונה מ-DiceBear על בסיס ה-username
+
+    # 2. Build an avatar URL from DiceBear based on the username
     username_seed = user.get('username', 'default')
     avatar_url = f"https://api.dicebear.com/7.x/avataaars/svg?seed={username_seed}"
-    
-    # 3. יצירת סיסמה והצפנתה
+
+    # 3. Generate a password and hash it
     plain_password = generate_random_password()
     hashed_password = bcrypt.hashpw(plain_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    
-    # שאילתת הזרקה מעודכנת עם profile_picture_url
+
+    # Updated insert query with profile_picture_url
     query = """
         INSERT INTO users (name, email, password, bio, profile_picture_url) 
         VALUES (%s, %s, %s, %s, %s)
@@ -51,7 +51,7 @@ for user in users:
 conn.commit()
 print("Users populated/updated with bio and profile pictures successfully!")
 
-# משיכת פוסטים מה-API והזרקה לטבלה
+# Fetch posts from the API and insert them into the table
 posts = requests.get('https://jsonplaceholder.typicode.com/posts').json()
 
 for post in posts:
@@ -87,6 +87,61 @@ for follower_id in user_ids:
 
 conn.commit()
 print("Random follow relationships created successfully!")
+
+# ==========================================
+# ── Seeding Comments and Likes ────────────
+# ==========================================
+print("Seeding comments and likes...")
+
+# 1. Fetch the ids of all existing posts
+cursor.execute("SELECT id FROM posts")
+post_ids = [row[0] for row in cursor.fetchall()]
+
+# (we reuse the user_ids fetched earlier in the script for the followers)
+
+# 2. Build a list of fake comments suited to our DIY project
+fake_comments = [
+    "Wow, this looks amazing! Great job.",
+    "Can you share the list of materials you used?",
+    "I need to try this on the weekend!",
+    "Love the colors. Very creative.",
+    "How long did this take to build?",
+    "Not bad, but I would have used different wood.",
+    "Thanks for the inspiration!",
+    "My attempt at this was a total disaster 😂"
+]
+
+# 3. Loop over every post and insert likes and comments
+for post_id in post_ids:
+
+    # --- Insert comments ---
+    # Pick a random number of comments per post (e.g. between 0 and 3)
+    num_comments = random.randint(0, 3)
+    for _ in range(num_comments):
+        random_user_id = random.choice(user_ids)  # pick a random user to comment
+        random_content = random.choice(fake_comments)  # pick random text from the list
+
+        cursor.execute(
+            "INSERT INTO comments (user_id, post_id, content) VALUES (%s, %s, %s)",
+            (random_user_id, post_id, random_content)
+        )
+
+    # --- Insert likes ---
+    # Pick how many likes the post will have (between 0 and 8 likes)
+    num_likes = random.randint(0, min(8, len(user_ids)))
+
+    # Use random.sample to pick unique users (no duplicates)
+    likers = random.sample(user_ids, num_likes)
+
+    for liker_id in likers:
+        cursor.execute(
+            "INSERT IGNORE INTO likes (user_id, post_id) VALUES (%s, %s)",
+            (liker_id, post_id)
+        )
+
+# 4. Commit all changes to the database
+conn.commit()
+print("Comments and likes created successfully!")
 
 cursor.close()
 conn.close()

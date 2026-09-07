@@ -3,64 +3,92 @@ import Box from '@mui/material/Box';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
+import Avatar from '@mui/material/Avatar';
 import { Link, useNavigate } from 'react-router-dom';
+import { logout } from '../api';
 
+/**
+ * Site header, shown on every page:
+ * serif "BlogApp" logo on the left, nav links + a Write button on the right,
+ * and the logged-in user's avatar with a logout action.
+ */
 function TopBar({ currentUser, setCurrentUser }) {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
-    await fetch('/api/logout', {
-      method: 'POST',
-      credentials: 'include'
-    });
+    await logout();
     setCurrentUser(null);
     navigate('/Login');
   };
 
-  // 1. Dynamic nav items: filter out 'Login' if user is logged in
-  const navItems = currentUser
-    ? ['Home', 'Users', 'Profile', 'About']
-    : ['Home', 'Users', 'About', 'Login'];
+  // "Login" only shows for visitors; "Profile" only for logged-in users
+  const navLinks = currentUser
+    ? [
+        { label: 'Home', to: '/Home' },
+        { label: 'Authors', to: '/Users' },
+        { label: 'Profile', to: '/profile' },
+        { label: 'About', to: '/About' },
+      ]
+    : [
+        { label: 'Home', to: '/Home' },
+        { label: 'Authors', to: '/Users' },
+        { label: 'About', to: '/About' },
+        { label: 'Login', to: '/Login' },
+      ];
 
   return (
-    // 2. Add zIndex to Box/AppBar to ensure it stays above content
-    <Box sx={{ display: 'flex', zIndex: 1200, position: 'relative' }}>
-      <AppBar component="nav" sx={{ backgroundColor: '#5b6dfa', zIndex: 1200 }}>
-        <Toolbar>
-          <Typography variant="h6" component="div" sx={{ fontWeight: 700, mr: 2 }}>
-            MyApp
+    <>
+      <AppBar
+        position="fixed"
+        elevation={0}
+        sx={{
+          backgroundColor: 'background.paper',
+          color: 'text.primary',
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        <Toolbar sx={{ maxWidth: 1100, width: '100%', mx: 'auto' }}>
+          {/* Logo */}
+          <Typography
+            component={Link}
+            to="/Home"
+            variant="h5"
+            sx={{ color: 'text.primary', textDecoration: 'none', letterSpacing: '-0.5px' }}
+          >
+            HandyHub<Box component="span" sx={{ color: 'secondary.main' }}>.</Box>
           </Typography>
-          
-          {/* New Post Button - only show if logged in */}
-          {currentUser && (
-            <Button component={Link} to="/new-post" variant="contained" sx={{ background: '#f5a623', color: '#000' }}>
-              + New Post
-            </Button>
-          )}
 
           <Box sx={{ flexGrow: 1 }} />
-          
-          <Box>
-            {navItems.map((item) => (
-              <Button key={item} sx={{ color: '#fff' }} component={Link} to={`/${item === 'Home' ? '' : item.toLowerCase()}`}>
-                {item}
+
+          {/* Nav links */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {navLinks.map(({ label, to }) => (
+              <Button key={label} component={Link} to={to} sx={{ color: 'text.secondary', px: 1.5 }}>
+                {label}
               </Button>
             ))}
           </Box>
 
           {currentUser && (
-            <Box sx={{ ml: 2, textAlign: 'right' }}>
-              <Typography variant="body2" sx={{ color: '#fff' }}>{currentUser.email}</Typography>
-              <Button onClick={handleLogout} sx={{ color: '#f5a623', p: 0, minWidth: 0, fontSize: 12 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, ml: 2 }}>
+              <Button component={Link} to="/new-post" variant="contained" sx={{ px: 2.5, whiteSpace: 'nowrap' }}>
+                ✎ Write
+              </Button>
+              <Avatar sx={{ width: 34, height: 34, bgcolor: 'secondary.main', fontSize: 15 }}>
+                {(currentUser.name || currentUser.email || '?')[0].toUpperCase()}
+              </Avatar>
+              <Button onClick={handleLogout} size="small" sx={{ color: 'text.secondary', minWidth: 0 }}>
                 Logout
               </Button>
             </Box>
           )}
         </Toolbar>
       </AppBar>
-      {/* Spacer to prevent content from going under the fixed navbar */}
-      <Toolbar /> 
-    </Box>
+
+      {/* Spacer so page content starts below the fixed header */}
+      <Toolbar />
+    </>
   );
 }
 
