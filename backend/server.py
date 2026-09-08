@@ -35,6 +35,7 @@ Route groups (in order below):
 
 import os
 import uuid
+from functools import wraps
 
 import bcrypt
 import mysql.connector
@@ -107,6 +108,55 @@ def current_user_id():
     row = cursor.fetchone()
     cursor.close()
     return row[0] if row else None
+
+
+def current_user_role():
+    """
+    Return the role of the logged-in user ('user' / 'moderator' / 'admin'),
+    or None if nobody is logged in.
+    """
+    session_id = request.cookies.get('session_id')
+    if not session_id:
+        return None
+
+    cursor = get_db().cursor()
+    cursor.execute(
+        """
+        SELECT users.role
+        FROM sessions
+        JOIN users ON sessions.user_id = users.id
+        WHERE sessions.session_id = %s
+        """,
+        (session_id,),
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    return row[0] if row else None
+
+
+def roles_required(*allowed_roles):
+    """
+    Route decorator: reject anyone whose role is not in `allowed_roles`.
+
+        @app.route('/api/admin/reports')
+        @roles_required('admin', 'moderator')
+        def list_reports():
+            ...
+
+    401 means "I don't know who you are"; 403 means "I know exactly who you
+    are, and you're not allowed in".
+    """
+    def decorator(view_function):
+        @wraps(view_function)
+        def wrapper(*args, **kwargs):
+            role = current_user_role()
+            if role is None:
+                return jsonify({'message': 'Unauthorized'}), 401
+            if role not in allowed_roles:
+                return jsonify({'message': 'Forbidden - insufficient permissions'}), 403
+            return view_function(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def serialize_timestamps(posts):
@@ -214,7 +264,7 @@ def me():
     cursor = get_db().cursor()
     cursor.execute(
         """
-        SELECT users.id, users.name, users.email
+        SELECT users.id, users.name, users.email, users.role
         FROM sessions
         JOIN users ON sessions.user_id = users.id
         WHERE sessions.session_id = %s
@@ -226,7 +276,7 @@ def me():
     if not user:
         return jsonify({'message': 'Invalid session'}), 401
 
-    return jsonify({'id': user[0], 'name': user[1], 'email': user[2]}), 200
+    return jsonify({'id': user[0], 'name': user[1], 'email': user[2], 'role': user[3]}), 200
 
 
 # ═════════════════════════════════════════════════════════════════════════════

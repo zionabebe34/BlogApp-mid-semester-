@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS users (
     password            VARCHAR(255)        NOT NULL,
     bio                 TEXT,
     profile_picture_url TEXT,
+    role                VARCHAR(20)         NOT NULL DEFAULT 'user',
     created_at          DATETIME            DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -97,6 +98,19 @@ CREATE TABLE IF NOT EXISTS comments (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 );
+
+-- Add `role` to databases created before this column existed.
+-- MySQL has no "ADD COLUMN IF NOT EXISTS", so we check information_schema first.
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = 'homework_5' AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'
+);
+SET @sql = IF(@col_exists = 0,
+              'ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT ''user''',
+              'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 SQL
 echo "    Database ready."
 

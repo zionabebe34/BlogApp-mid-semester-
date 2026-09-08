@@ -1,6 +1,7 @@
 import pytest
 import bcrypt
 import sys
+import mysql.connector
 from unittest.mock import MagicMock, patch
 
 sys.modules.pop('server', None)
@@ -123,7 +124,7 @@ class TestLogout:
 class TestMe:
     def test_me_authorized(self, client):
         #Arrange
-        fake_user = (1, "testuser", "testuser@example.com")
+        fake_user = (1, "testuser", "testuser@example.com", "user")
         mock_cursor = MagicMock()
         mock_db = MagicMock()
         mock_db.cursor.return_value = mock_cursor
@@ -424,6 +425,164 @@ class TestFeedFollowing:
 
         #Assert
         assert response.status_code == 401
+
+
+class TestLikes:
+    def test_like_post_authorized(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/posts/1/like')
+
+        #Assert
+        assert response.status_code == 200
+        assert b"Post liked successfully" in response.data
+
+    def test_like_post_unauthorized(self, client):
+        #Act - no cookie
+        response = client.post('/api/posts/1/like')
+
+        #Assert
+        assert response.status_code == 401
+
+    def test_like_post_duplicate_returns_400(self, client):
+        #Arrange - the INSERT raises MySQL error 1062 (duplicate entry)
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        mock_cursor.execute.side_effect = [None, mysql.connector.Error(errno=1062)]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/posts/1/like')
+
+        #Assert
+        assert response.status_code == 400
+        assert b"You already liked this post" in response.data
+
+    def test_unlike_post_authorized(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/posts/1/unlike')
+
+        #Assert
+        assert response.status_code == 200
+        assert b"Post unliked successfully" in response.data
+
+    def test_unlike_post_unauthorized(self, client):
+        #Act - no cookie
+        response = client.post('/api/posts/1/unlike')
+
+        #Assert
+        assert response.status_code == 401
+
+    def test_get_post_likes_anonymous(self, client):
+        #Arrange - no cookie, so current_user_id() returns None straight away
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = {'count': 5}
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.get('/api/posts/1/likes')
+
+        #Assert
+        assert response.status_code == 200
+        assert response.get_json() == {'like_count': 5, 'liked_by_me': False}
+
+    def test_get_post_likes_logged_in(self, client):
+        #Arrange - three fetchone calls: COUNT, current_user_id, SELECT 1
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.side_effect = [{'count': 5}, (1,), (1,)]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.get('/api/posts/1/likes')
+
+        #Assert
+        assert response.status_code == 200
+        assert response.get_json() == {'like_count': 5, 'liked_by_me': True}
+
+
+class TestComments:
+    def test_get_post_comments(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchall.return_value = [
+            {'id': 1, 'content': 'Nice post!', 'created_at': None,
+             'user_id': 2, 'user_name': 'commenter', 'profile_picture_url': ''}
+        ]
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.get('/api/user-posts/1/comments')
+
+        #Assert
+        assert response.status_code == 200
+        assert b"Nice post!" in response.data
+
+    def test_add_comment_authorized(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/user-posts/1/comments',
+                                   json={"content": "My comment"})
+
+        #Assert
+        assert response.status_code == 201
+        assert b"Comment added successfully" in response.data
+
+    def test_add_comment_unauthorized(self, client):
+        #Act - no cookie
+        response = client.post('/api/user-posts/1/comments',
+                               json={"content": "My comment"})
+
+        #Assert
+        assert response.status_code == 401
+
+    def test_add_comment_empty_content_returns_400(self, client):
+        #Arrange - whitespace only, so .strip() makes it empty
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/user-posts/1/comments',
+                                   json={"content": "   "})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"Comment content is required" in response.data
 
 
 
