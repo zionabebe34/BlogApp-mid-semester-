@@ -5,7 +5,7 @@ import {
   Dialog, DialogTitle, DialogContent, TextField, Button, Divider,
 } from '@mui/material';
 import { timeAgo } from '../utils/timeAgo';
-import { likePost, unlikePost, getPostLikes, getPostComments, addComment } from '../api';
+import { likePost, unlikePost, getPostLikes, getPostComments, addComment, reportPost } from '../api';
 
 /**
  * Instagram-like square tile: dominant square image with an overlay
@@ -21,6 +21,8 @@ function SinglePostCard({ postId, title, authorName, authorEmail, body, imageUrl
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState('');
 
   // Fetch this post's like + comment info once, when the card mounts
   useEffect(() => {
@@ -72,6 +74,19 @@ function SinglePostCard({ postId, title, authorName, authorEmail, body, imageUrl
     }
   };
 
+  const handleReport = async () => {
+    const reason = reportReason.trim();
+    if (!reason) return;
+    try {
+      await reportPost(postId, reason);
+      setReportReason('');
+      setReportOpen(false);
+      alert('Thanks — a moderator will review this post.');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   // Defined once, rendered in both layouts below
   const likeButton = (
     <Box
@@ -98,12 +113,50 @@ function SinglePostCard({ postId, title, authorName, authorEmail, body, imageUrl
     </Box>
   );
 
-  // Like + comment side by side — rendered in both layouts below
+  const reportButton = (
+    <Box
+      onClick={(event) => {
+        event.stopPropagation();
+        setReportOpen(true);
+      }}
+      sx={{ cursor: 'pointer', userSelect: 'none', opacity: 0.7 }}
+      title="Report this post"
+    >
+      <Typography component="span" sx={{ fontSize: 14, lineHeight: 1 }}>🚩</Typography>
+    </Box>
+  );
+
+  // Like + comment on the left, report pushed to the far right
   const actionsRow = (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
       {likeButton}
       {commentButton}
+      <Box sx={{ flexGrow: 1 }} />
+      {reportButton}
     </Box>
+  );
+
+  const reportDialog = (
+    <Dialog open={reportOpen} onClose={() => setReportOpen(false)} fullWidth maxWidth="xs">
+      <DialogTitle sx={{ fontSize: '1rem' }}>Report this post</DialogTitle>
+      <DialogContent>
+        <TextField
+          fullWidth
+          size="small"
+          autoFocus
+          placeholder="Why are you reporting it?"
+          value={reportReason}
+          onChange={(event) => setReportReason(event.target.value)}
+          sx={{ mt: 1 }}
+        />
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}>
+          <Button onClick={() => setReportOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleReport} disabled={!reportReason.trim()}>
+            Report
+          </Button>
+        </Box>
+      </DialogContent>
+    </Dialog>
   );
 
   const commentsDialog = (
@@ -196,6 +249,7 @@ function SinglePostCard({ postId, title, authorName, authorEmail, body, imageUrl
         </CardContent>
       </Card>
       {commentsDialog}
+      {reportDialog}
       </>
     );
   }

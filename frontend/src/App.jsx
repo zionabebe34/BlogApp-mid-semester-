@@ -11,6 +11,7 @@ import Login from './pages/Login';
 import Signup from './pages/Signup';
 import NewPost from './pages/NewPost';
 import About from './pages/About';
+import AdminPage from './pages/AdminPage';
 
 /**
  * Root component. It does two jobs:
@@ -50,6 +51,15 @@ function App() {
           <Route
             path="/new-post"
             element={currentUser ? <NewPost /> : <Navigate to="/Login" />}
+          />
+          {/* Staff-only page. This guard is UX; the backend decorator is the real one. */}
+          <Route
+            path="/admin"
+            element={
+              currentUser && ['admin', 'moderator'].includes(currentUser.role)
+                ? <AdminPage currentUser={currentUser} />
+                : <Navigate to="/Home" />
+            }
           />
           <Route path="/About" element={<About />} />
           <Route path="/" element={<Navigate to="/Home" />} />

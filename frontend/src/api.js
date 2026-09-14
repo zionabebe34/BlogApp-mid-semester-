@@ -104,3 +104,24 @@ export const addComment = (postId, content) =>
     method: 'POST',
     body: { content },
   });
+
+// ── Moderation (reporting) ──────────────────────────────────────────────────
+
+export const reportPost = (postId, reason) =>
+  request(`/api/posts/${postId}/report`, { method: 'POST', body: { reason } });
+
+// ── Admin / moderation dashboard ────────────────────────────────────────────
+
+export const getReports = () => request('/api/admin/reports');
+
+export const adminDeletePost = (postId) =>
+  request(`/api/admin/posts/${postId}`, { method: 'DELETE' });
+
+export const updateReportStatus = (reportId, status) =>
+  request(`/api/admin/reports/${reportId}`, { method: 'PUT', body: { status } });
+
+export const banUser = (userId) =>
+  request(`/api/admin/users/${userId}/ban`, { method: 'POST' });
+
+export const unbanUser = (userId) =>
+  request(`/api/admin/users/${userId}/unban`, { method: 'POST' });
