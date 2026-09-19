@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS users (
     bio                 TEXT,
     profile_picture_url TEXT,
     role                VARCHAR(20)         NOT NULL DEFAULT 'user',
+    is_banned           BOOLEAN             NOT NULL DEFAULT FALSE,
     created_at          DATETIME            DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -99,6 +100,28 @@ CREATE TABLE IF NOT EXISTS comments (
     FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS password_resets (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    user_id     INT          NOT NULL,
+    token_hash  VARCHAR(64)  NOT NULL UNIQUE,
+    expires_at  DATETIME     NOT NULL,
+    used_at     DATETIME     NULL,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    post_id     INT          NOT NULL,
+    reporter_id INT          NOT NULL,
+    reason      VARCHAR(255) NOT NULL,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'open',
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+    FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_report (post_id, reporter_id)
+);
+
 -- Add `role` to databases created before this column existed.
 -- MySQL has no "ADD COLUMN IF NOT EXISTS", so we check information_schema first.
 SET @col_exists = (
@@ -107,6 +130,18 @@ SET @col_exists = (
 );
 SET @sql = IF(@col_exists = 0,
               'ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT ''user''',
+              'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Same idempotent pattern for the `is_banned` flag.
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = 'homework_5' AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_banned'
+);
+SET @sql = IF(@col_exists = 0,
+              'ALTER TABLE users ADD COLUMN is_banned BOOLEAN NOT NULL DEFAULT FALSE',
               'SELECT 1');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;

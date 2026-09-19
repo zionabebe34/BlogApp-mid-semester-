@@ -31,10 +31,23 @@ Route groups (in order below):
                 /api/posts/<id>/unlike         (remove a like)
                 /api/posts/<id>/likes          (like count + did I like it)
                 /api/user-posts/<id>/comments  (GET: list comments, POST: add one)
+                /api/posts/<id>/report         (flag a post for review)
+   - Admin:     /api/admin/reports             (open reports; admin/moderator)
+                /api/admin/reports/<id>        (resolve or dismiss a report)
+                /api/admin/posts/<id>          (DELETE offending content)
+                /api/admin/users/<id>/ban      (ban a user; admin only)
+                /api/admin/users/<id>/unban    (lift a ban; admin only)
+   - Reset:     /api/forgot-password           (email a one-time reset link)
+                /api/reset-password            (consume the token, set password)
 """
 
+import hashlib
 import os
+import secrets
+import smtplib
 import uuid
+from datetime import datetime, timedelta
+from email.message import EmailMessage
 from functools import wraps
 
 import bcrypt
@@ -57,6 +70,9 @@ CORS(
 # MySQL duplicate/constraint error codes we handle explicitly
 ERR_DUPLICATE_ENTRY = 1062
 ERR_FOREIGN_KEY = 1452
+
+# How long a password-reset link stays valid
+RESET_TOKEN_TTL_HOURS = 1
 
 
 # ── Database connection ──────────────────────────────────────────────────────
@@ -103,8 +119,18 @@ def current_user_id():
     if not session_id:
         return None
 
+    # Banned users are excluded here too, so an existing session stops working
+    # the moment the ban lands — not just on their next login attempt.
     cursor = get_db().cursor()
-    cursor.execute("SELECT user_id FROM sessions WHERE session_id = %s", (session_id,))
+    cursor.execute(
+        """
+        SELECT sessions.user_id
+        FROM sessions
+        JOIN users ON sessions.user_id = users.id
+        WHERE sessions.session_id = %s AND users.is_banned = FALSE
+        """,
+        (session_id,),
+    )
     row = cursor.fetchone()
     cursor.close()
     return row[0] if row else None
@@ -157,6 +183,58 @@ def roles_required(*allowed_roles):
             return view_function(*args, **kwargs)
         return wrapper
     return decorator
+
+
+# ── Password reset helpers ───────────────────────────────────────────────────
+def hash_reset_token(token):
+    """
+    Hash a reset token before storing it, for the same reason we hash
+    passwords: a leaked table should not hand out working tokens.
+
+    SHA-256 (not bcrypt) is enough here — the token is 32 random bytes,
+    so there is nothing to brute-force.
+    """
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
+def send_reset_email(email, token):
+    """
+    Email the reset link over SMTP.
+
+    Everything environment-specific lives in config.env, so moving to AWS SES
+    at deployment is a config change, not a code change. If SMTP isn't
+    configured (tests, fresh clone) we fall back to printing the link.
+    """
+    base_url = os.getenv('APP_BASE_URL', 'http://localhost:5174')
+    reset_url = f"{base_url}/reset-password?token={token}"
+
+    host = os.getenv('SMTP_HOST')
+    user = os.getenv('SMTP_USER')
+    password = os.getenv('SMTP_PASSWORD')
+
+    if not (host and user and password):
+        print(f"\n[password reset] for {email}: {reset_url}\n", flush=True)
+        return
+
+    message = EmailMessage()
+    message['Subject'] = 'Reset your HandyHub password'
+    message['From'] = user
+    message['To'] = email
+    message.set_content(
+        "Someone asked to reset the password for this HandyHub account.\n\n"
+        f"Open this link within {RESET_TOKEN_TTL_HOURS} hour(s) to choose a new password:\n"
+        f"{reset_url}\n\n"
+        "If this wasn't you, you can ignore this email — nothing has changed."
+    )
+
+    try:
+        with smtplib.SMTP(host, int(os.getenv('SMTP_PORT', 587))) as smtp:
+            smtp.starttls()  # encrypt the connection before sending credentials
+            smtp.login(user, password)
+            smtp.send_message(message)
+    except Exception as err:
+        # A mail failure must not reveal whether the address exists
+        print(f"[password reset] failed to email {email}: {err}", flush=True)
 
 
 def serialize_timestamps(posts):
@@ -215,27 +293,37 @@ def login():
     email = data.get('email')
     password = data.get('password')
 
+    # Listing the columns explicitly (instead of SELECT *) keeps this code
+    # independent of the order columns happen to have in the table.
     cursor = get_db().cursor()
-    cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
-    user = cursor.fetchone()  # columns: id, name, email, password, ...
+    cursor.execute(
+        "SELECT id, name, password, is_banned FROM users WHERE email = %s",
+        (email,),
+    )
+    user = cursor.fetchone()
 
     if not user:
         return jsonify({'message': 'Invalid email or password'}), 401
 
-    if not bcrypt.checkpw(password.encode('utf-8'), user[3].encode('utf-8')):
+    user_id, name, hashed_password, is_banned = user
+
+    if not bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
         return jsonify({'message': 'Invalid email or password'}), 401
+
+    if is_banned:
+        return jsonify({'message': 'This account has been banned'}), 403
 
     # Create a fresh session id (replacing any previous one for this user)
     session_id = str(uuid.uuid4())
     cursor.execute(
         "INSERT INTO sessions (user_id, session_id) VALUES (%s, %s) "
         "ON DUPLICATE KEY UPDATE session_id = %s",
-        (user[0], session_id, session_id),
+        (user_id, session_id, session_id),
     )
     get_db().commit()
 
     # The cookie is how the browser proves who it is on future requests
-    response = make_response(jsonify({'message': 'Login successful', 'email': email, 'name': user[1]}))
+    response = make_response(jsonify({'message': 'Login successful', 'email': email, 'name': name}))
     response.set_cookie('session_id', session_id, httponly=True, samesite='Lax')
     return response, 200
 
@@ -252,6 +340,79 @@ def logout():
     response = make_response(jsonify({'message': 'Logout successful'}))
     response.delete_cookie('session_id')
     return response, 200
+
+
+@app.route('/api/forgot-password', methods=['POST'])
+def forgot_password():
+    """
+    Start a reset. Always answers 200, even for an unknown address — telling
+    a stranger whether an email is registered leaks who your users are
+    (user enumeration).
+    """
+    email = request.get_json().get('email', '').strip()
+    generic_reply = jsonify({'message': 'If that email exists, a reset link has been sent'}), 200
+
+    if not email:
+        return generic_reply
+
+    cursor = get_db().cursor()
+    cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+    row = cursor.fetchone()
+
+    if row:
+        user_id = row[0]
+        token = secrets.token_urlsafe(32)  # `secrets`, not `random`: unpredictable
+        expires_at = datetime.now() + timedelta(hours=RESET_TOKEN_TTL_HOURS)
+
+        cursor.execute(
+            "INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES (%s, %s, %s)",
+            (user_id, hash_reset_token(token), expires_at),
+        )
+        get_db().commit()
+        send_reset_email(email, token)
+
+    cursor.close()
+    return generic_reply
+
+
+@app.route('/api/reset-password', methods=['POST'])
+def reset_password():
+    """Finish a reset: verify the token, set the new password, burn the token."""
+    data = request.get_json()
+    token = data.get('token', '').strip()
+    new_password = data.get('password', '')
+
+    if not token or not new_password:
+        return jsonify({'message': 'Token and password are required'}), 400
+    if len(new_password) < 6:
+        return jsonify({'message': 'Password must be at least 6 characters'}), 400
+
+    # All three conditions in one query: right token, unused, not expired
+    cursor = get_db().cursor()
+    cursor.execute(
+        """
+        SELECT id, user_id FROM password_resets
+        WHERE token_hash = %s AND used_at IS NULL AND expires_at > NOW()
+        """,
+        (hash_reset_token(token),),
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        cursor.close()
+        return jsonify({'message': 'This reset link is invalid or has expired'}), 400
+
+    reset_id, user_id = row
+    hashed = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    cursor.execute("UPDATE users SET password = %s WHERE id = %s", (hashed, user_id))
+    cursor.execute("UPDATE password_resets SET used_at = NOW() WHERE id = %s", (reset_id,))
+    # Anyone signed in with the old password is logged out
+    cursor.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+    get_db().commit()
+    cursor.close()
+
+    return jsonify({'message': 'Password updated successfully'}), 200
 
 
 @app.route('/api/me', methods=['GET'])
@@ -648,6 +809,132 @@ def get_post_likes(post_id):
         cursor.close()
         return jsonify({'like_count': like_count, 'liked_by_me': liked_by_me}), 200
 
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Moderation routes (reporting)
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/posts/<int:post_id>/report', methods=['POST'])
+def report_post(post_id):
+    """Let a logged-in user flag a post for moderator review."""
+    reporter_id = current_user_id()
+    if reporter_id is None:
+        return jsonify({'message': 'Unauthorized'}), 401
+
+    reason = request.get_json().get('reason', '').strip()
+    if not reason:
+        return jsonify({'message': 'A reason is required'}), 400
+
+    try:
+        cursor = get_db().cursor()
+        cursor.execute(
+            "INSERT INTO reports (post_id, reporter_id, reason) VALUES (%s, %s, %s)",
+            (post_id, reporter_id, reason),
+        )
+        get_db().commit()
+        cursor.close()
+        return jsonify({'message': 'Post reported successfully'}), 201
+
+    except mysql.connector.Error as err:
+        if err.errno == ERR_DUPLICATE_ENTRY:
+            return jsonify({'message': 'You already reported this post'}), 400
+        if err.errno == ERR_FOREIGN_KEY:
+            return jsonify({'message': 'Post does not exist'}), 404
+        return jsonify({'message': 'Database error occurred'}), 500
+
+
+@app.route('/api/admin/reports', methods=['GET'])
+@roles_required('admin', 'moderator')
+def list_reports():
+    """All open reports, newest first, with post and reporter details."""
+    cursor = get_db().cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT reports.id, reports.reason, reports.status, reports.created_at,
+               posts.id AS post_id, posts.title AS post_title,
+               author.id AS author_id, author.name AS author_name,
+               reporter.name AS reporter_name
+        FROM reports
+        JOIN posts ON reports.post_id = posts.id
+        JOIN users AS author ON posts.author_id = author.id
+        JOIN users AS reporter ON reports.reporter_id = reporter.id
+        WHERE reports.status = 'open'
+        ORDER BY reports.created_at DESC
+        """
+    )
+    results = serialize_timestamps(cursor.fetchall())
+    cursor.close()
+    return jsonify(results), 200
+
+
+@app.route('/api/admin/posts/<int:post_id>', methods=['DELETE'])
+@roles_required('admin', 'moderator')
+def admin_delete_post(post_id):
+    """Remove a post. Its likes, comments and reports go with it (ON DELETE CASCADE)."""
+    cursor = get_db().cursor()
+    cursor.execute("DELETE FROM posts WHERE id = %s", (post_id,))
+    deleted = cursor.rowcount
+    get_db().commit()
+    cursor.close()
+
+    if deleted == 0:
+        return jsonify({'message': 'Post not found'}), 404
+    return jsonify({'message': 'Post deleted successfully'}), 200
+
+
+@app.route('/api/admin/reports/<int:report_id>', methods=['PUT'])
+@roles_required('admin', 'moderator')
+def update_report_status(report_id):
+    """Mark a report as 'resolved' (action taken) or 'dismissed' (no action needed)."""
+    new_status = request.get_json().get('status', '').strip()
+    if new_status not in ('resolved', 'dismissed'):
+        return jsonify({'message': "Status must be 'resolved' or 'dismissed'"}), 400
+
+    cursor = get_db().cursor()
+    cursor.execute("UPDATE reports SET status = %s WHERE id = %s", (new_status, report_id))
+    updated = cursor.rowcount
+    get_db().commit()
+    cursor.close()
+
+    if updated == 0:
+        return jsonify({'message': 'Report not found'}), 404
+    return jsonify({'message': f'Report marked as {new_status}'}), 200
+
+
+@app.route('/api/admin/users/<int:user_id>/ban', methods=['POST'])
+@roles_required('admin')
+def ban_user(user_id):
+    """Ban a user and kill their active session. Admins only, not moderators."""
+    if current_user_id() == user_id:
+        return jsonify({'message': 'You cannot ban yourself'}), 400
+
+    cursor = get_db().cursor()
+    cursor.execute("UPDATE users SET is_banned = TRUE WHERE id = %s", (user_id,))
+    updated = cursor.rowcount
+    # Log them out immediately instead of waiting for the session to expire
+    cursor.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+    get_db().commit()
+    cursor.close()
+
+    if updated == 0:
+        return jsonify({'message': 'User not found'}), 404
+    return jsonify({'message': 'User banned successfully'}), 200
+
+
+@app.route('/api/admin/users/<int:user_id>/unban', methods=['POST'])
+@roles_required('admin')
+def unban_user(user_id):
+    """Lift a ban."""
+    cursor = get_db().cursor()
+    cursor.execute("UPDATE users SET is_banned = FALSE WHERE id = %s", (user_id,))
+    updated = cursor.rowcount
+    get_db().commit()
+    cursor.close()
+
+    if updated == 0:
+        return jsonify({'message': 'User not found'}), 404
+    return jsonify({'message': 'User unbanned successfully'}), 200
 
 
 #getting the comments for post

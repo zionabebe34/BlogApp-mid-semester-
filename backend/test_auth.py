@@ -82,8 +82,8 @@ class TestLogin:
         password = "testpassword"
         hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-        # Fake user row: (id, name, email, password)
-        fake_user = (1, "testuser", "testuser@example.com", hashed)
+        # Fake user row matching the explicit SELECT: (id, name, password, is_banned)
+        fake_user = (1, "testuser", hashed, False)
 
         mock_cursor = MagicMock()
         mock_db = MagicMock()
