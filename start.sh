@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS users (
     profile_picture_url TEXT,
     role                VARCHAR(20)         NOT NULL DEFAULT 'user',
     is_banned           BOOLEAN             NOT NULL DEFAULT FALSE,
+    totp_secret         VARCHAR(32),
+    totp_enabled        BOOLEAN             NOT NULL DEFAULT FALSE,
     created_at          DATETIME            DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -142,6 +144,29 @@ SET @col_exists = (
 );
 SET @sql = IF(@col_exists = 0,
               'ALTER TABLE users ADD COLUMN is_banned BOOLEAN NOT NULL DEFAULT FALSE',
+              'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Same idempotent pattern for the two-factor auth columns.
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = 'homework_5' AND TABLE_NAME = 'users' AND COLUMN_NAME = 'totp_secret'
+);
+SET @sql = IF(@col_exists = 0,
+              'ALTER TABLE users ADD COLUMN totp_secret VARCHAR(32)',
+              'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = 'homework_5' AND TABLE_NAME = 'users' AND COLUMN_NAME = 'totp_enabled'
+);
+SET @sql = IF(@col_exists = 0,
+              'ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT FALSE',
               'SELECT 1');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;

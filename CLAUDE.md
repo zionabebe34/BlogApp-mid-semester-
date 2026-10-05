@@ -30,14 +30,21 @@ backend/
   test_auth_integration.py  integration tests (real DB)
   config.env                secrets — gitignored
   config.env.example        template
+  schema.sql                CREATE TABLE only, for Docker's MySQL init — start.sh
+                             has its own copy with guarded ALTER TABLE migrations
+  Dockerfile                backend image
 frontend/src/
   api.js                    every backend call; nothing else uses fetch()
   components/SinglePost.jsx post card: likes, comments dialog, report flag
-  pages/                    Feed, Login, Signup, AdminPage, profiles…
+  pages/                    Feed, Login, Signup, ForgotPassword, ResetPassword,
+                             AdminPage, profiles…
+  Dockerfile                frontend image (runs `vite --host` dev server)
 start.sh                    creates DB + tables, seeds, starts both servers
+docker-compose.yml          db + backend + frontend, for containerized run
 ```
 
-Run: `./start.sh` (add `--seed` to reseed, `--seed-only` to just apply schema).
+Run locally: `./start.sh` (add `--seed` to reseed, `--seed-only` to just apply schema).
+Run with Docker: `docker compose up --build`, then open `http://localhost:5173`.
 Tests: `cd backend && .venv/bin/python -m pytest`
 
 ## Conventions in this codebase
@@ -65,55 +72,48 @@ Source: `finalProject.pdf`. Section 1 (mid-semester) is complete.
 
 | # | Requirement | Status |
 |---|---|---|
-| 2.a.i | Secure password reset (email) | **~90%** — see below |
+| 2.a.i | Secure password reset (email) | ✅ done — frontend, backend, tests, real SMTP all verified |
 | 2.b.i | Likes / reactions | ✅ done |
 | 2.b.ii | Comments (flat) | ✅ done |
-| 2.c | Auto-correction, post & comment suggestions | ❌ not started |
-| 2.d.i | 10 autonomous agent accounts, continuous activity | ❌ not started |
-| 2.d.ii | Agent personality stored in user profile | ❌ not started |
+| 2.c | Auto-correction, post & comment suggestions | ❌ not started — blocked on `llm_service.py` |
+| 2.d.i | 10 autonomous agent accounts, continuous activity | ❌ not started — blocked on `llm_service.py` |
+| 2.d.ii | Agent personality stored in user profile | ❌ not started — blocked on `llm_service.py` |
 | 2.e.i | Moderators | ✅ done |
 | 2.e.ii | Report system + admin dashboard | ✅ done |
-| 2.e.iii | Sentiment analysis **before** publishing | ❌ not started |
-| 2.f | 85% code coverage | ⚠️ 61 tests pass; coverage % not measured |
+| 2.e.iii | Sentiment analysis **before** publishing | ❌ not started — blocked on `llm_service.py` |
+| 2.f | 85% code coverage | ✅ done — 89% measured (84 tests: 61 unit + 23 integration) |
 
-### Section 3 — Optional (must deliver 3 of 6). Chosen:
+### Section 3 — Optional (must deliver 3 of 6). Chosen (finalized 2026-09-24):
 
-1. **Secure Login** — both sub-items required: OAuth (Google) **and** 2FA (TOTP)
-2. **Responsive Design**
-3. **Containerization** — Dockerfile + docker-compose
+1. **Direct Messaging** — private chat between users — ❌ not started
+2. **2FA (TOTP)** — not OAuth; Zion picked 2FA only, OAuth is not required — ✅ done,
+   verified end-to-end (enable flow on `MyProfilePage`, login gate in `Login.jsx`)
+3. **Containerization** — Dockerfile + docker-compose — ✅ done, verified end-to-end
+   (signup writes to DB through the container network, feed reads back correctly)
 
-All three are ❌ not started.
+Not chosen (available but dropped): Responsive Design, OAuth (Google) login,
+Recommendation Engine / Trending Topics.
 
 ## Do this next
 
-1. **Finish 2.a.i (password reset).** Backend is written: `password_resets`
-   table, `hash_reset_token()`, `send_reset_email()`, `/api/forgot-password`,
-   `/api/reset-password`. Remaining:
-   - Zion must generate a Google App Password and put it in
-     `config.env` → `SMTP_PASSWORD` (empty now, so the link prints to the
-     console instead of sending).
-   - Run `./start.sh --seed-only` to create the table.
-   - **Frontend is missing entirely**: a "Forgot password?" link on Login, a
-     page to request the email, and `/reset-password` to consume
-     `?token=` and set a new password.
-   - No tests yet.
-
-2. **Build `llm_service.py`.** One shared abstraction unlocks three
+1. **Build `llm_service.py`.** One shared abstraction unlocks three
    requirements: 2.c, 2.d and 2.e.iii. Zion has **AWS Bedrock** keys and that
-   was the agreed provider. Do this before the agents — they depend on it.
+   was the agreed provider, but as of 2026-09-23 he deferred deciding on:
+   - How AWS credentials will be supplied (CLI profile / `aws configure` vs.
+     explicit `AWS_ACCESS_KEY_ID`+`AWS_SECRET_ACCESS_KEY` in `config.env`).
+   - Which Bedrock model to call (no preference chosen yet).
+   Don't start this file until Zion revisits both questions. Do this before
+   the agents — they depend on it.
 
-3. **2.e.iii sentiment analysis.** Must run *inside* `add_comment`, before the
+2. **2.e.iii sentiment analysis.** Must run *inside* `add_comment`, before the
    `INSERT` — the spec says "before they are even published".
 
-4. **2.d agents.** 10 bot users with a `personality` column on `users`, plus a
+3. **2.d agents.** 10 bot users with a `personality` column on `users`, plus a
    background scheduler (APScheduler was the plan) that posts and replies
    continuously.
 
-5. **Tests to 85%.** Measure first:
-   `.venv/bin/python -m pytest --cov=server --cov-report=term-missing`.
-   No tests exist yet for roles, reports, ban, or password reset.
-
-6. **The three optional requirements**, then AWS deployment last.
+4. **The last remaining optional requirement: Direct Messaging**, then AWS
+   deployment last.
 
 ## Known issues (deliberately deferred)
 
@@ -125,4 +125,9 @@ All three are ❌ not started.
   `is_banned` columns.
 - `/api/user-posts/<id>/comments` uses a different prefix from
   `/api/posts/<id>/likes`. Historical inconsistency; harmless but worth knowing.
-- `htmlcov/` is generated output and should be gitignored.
+- **This project used to live at `~/Desktop/BlogApp-mid-semester-`** and moved to
+  `~/Projects/BlogApp-mid-semester-` on 2026-09-30 because iCloud Drive's
+  "Desktop & Documents" sync was dehydrating `.venv`/`node_modules` files and
+  causing multi-minute stalls on ordinary `pip`/`npm`/`pytest` commands. A
+  stale copy may still exist on the Desktop — safe to delete, it's not the
+  working copy.

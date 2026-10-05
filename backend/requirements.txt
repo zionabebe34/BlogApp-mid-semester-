@@ -4,5 +4,6 @@ bcrypt
 requests
 mysql-connector-python
 python-dotenv
+pyotp
 pytest
 pytest-cov

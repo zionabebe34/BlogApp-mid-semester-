@@ -9,6 +9,8 @@ import UserPostsPage from './pages/UserPostsPage';
 import MyProfilePage from './pages/MyProfilePage';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import NewPost from './pages/NewPost';
 import About from './pages/About';
 import AdminPage from './pages/AdminPage';
@@ -48,6 +50,8 @@ function App() {
           />
           <Route path="/Login" element={<Login setCurrentUser={setCurrentUser} />} />
           <Route path="/Signup" element={<Signup />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route
             path="/new-post"
             element={currentUser ? <NewPost /> : <Navigate to="/Login" />}

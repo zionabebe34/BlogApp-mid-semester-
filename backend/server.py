@@ -39,6 +39,8 @@ Route groups (in order below):
                 /api/admin/users/<id>/unban    (lift a ban; admin only)
    - Reset:     /api/forgot-password           (email a one-time reset link)
                 /api/reset-password            (consume the token, set password)
+   - 2FA:       /api/2fa/setup                 (generate a TOTP secret + QR)
+                /api/2fa/verify                (confirm a code, enable 2FA)
 """
 
 import hashlib
@@ -49,9 +51,11 @@ import uuid
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from functools import wraps
+from urllib.parse import quote
 
 import bcrypt
 import mysql.connector
+import pyotp
 from mysql.connector import pooling
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, make_response, g
@@ -213,7 +217,10 @@ def send_reset_email(email, token):
     password = os.getenv('SMTP_PASSWORD')
 
     if not (host and user and password):
-        print(f"\n[password reset] for {email}: {reset_url}\n", flush=True)
+        try:
+            print(f"\n[password reset] for {email}: {reset_url}\n", flush=True)
+        except OSError:
+            pass
         return
 
     message = EmailMessage()
@@ -292,12 +299,13 @@ def login():
     data = request.get_json()
     email = data.get('email')
     password = data.get('password')
+    totp_code = data.get('totp_code', '').strip()
 
     # Listing the columns explicitly (instead of SELECT *) keeps this code
     # independent of the order columns happen to have in the table.
     cursor = get_db().cursor()
     cursor.execute(
-        "SELECT id, name, password, is_banned FROM users WHERE email = %s",
+        "SELECT id, name, password, is_banned, totp_secret, totp_enabled FROM users WHERE email = %s",
         (email,),
     )
     user = cursor.fetchone()
@@ -305,13 +313,19 @@ def login():
     if not user:
         return jsonify({'message': 'Invalid email or password'}), 401
 
-    user_id, name, hashed_password, is_banned = user
+    user_id, name, hashed_password, is_banned, totp_secret, totp_enabled = user
 
     if not bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
         return jsonify({'message': 'Invalid email or password'}), 401
 
     if is_banned:
         return jsonify({'message': 'This account has been banned'}), 403
+
+    if totp_enabled:
+        if not totp_code:
+            return jsonify({'message': 'TOTP code required', 'requires_totp': True}), 401
+        if not pyotp.TOTP(totp_secret).verify(totp_code, valid_window=1):
+            return jsonify({'message': 'Invalid 2FA code'}), 401
 
     # Create a fresh session id (replacing any previous one for this user)
     session_id = str(uuid.uuid4())
@@ -417,7 +431,7 @@ def reset_password():
 
 @app.route('/api/me', methods=['GET'])
 def me():
-    """Tell the frontend who is currently logged in (id, name, email)."""
+    """Tell the frontend who is currently logged in (id, name, email, role, 2FA status)."""
     session_id = request.cookies.get('session_id')
     if not session_id:
         return jsonify({'message': 'Not logged in'}), 401
@@ -425,7 +439,7 @@ def me():
     cursor = get_db().cursor()
     cursor.execute(
         """
-        SELECT users.id, users.name, users.email, users.role
+        SELECT users.id, users.name, users.email, users.role, users.totp_enabled
         FROM sessions
         JOIN users ON sessions.user_id = users.id
         WHERE sessions.session_id = %s
@@ -437,7 +451,10 @@ def me():
     if not user:
         return jsonify({'message': 'Invalid session'}), 401
 
-    return jsonify({'id': user[0], 'name': user[1], 'email': user[2], 'role': user[3]}), 200
+    return jsonify({
+        'id': user[0], 'name': user[1], 'email': user[2],
+        'role': user[3], 'totp_enabled': bool(user[4]),
+    }), 200
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -991,6 +1008,79 @@ def add_comment(post_id):
         cursor.close()
         return jsonify({'message': f'Database error: {err}'}), 500
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 2FA routes (TOTP)
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/2fa/setup', methods=['POST'])
+def setup_totp():
+    """
+    Generate a new TOTP secret for the logged-in user and store it — but
+    not yet enabled. /api/2fa/verify is what flips totp_enabled to TRUE,
+    once we know the user actually scanned it and can produce a matching
+    code (otherwise they could lock themselves out with a secret their
+    app never saw).
+    """
+    user_id = current_user_id()
+    if user_id is None:
+        return jsonify({'message': 'Unauthorized'}), 401
+
+    cursor = get_db().cursor()
+    cursor.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+    email = cursor.fetchone()[0]
+
+    secret = pyotp.random_base32()
+    cursor.execute(
+        "UPDATE users SET totp_secret = %s, totp_enabled = FALSE WHERE id = %s",
+        (secret, user_id),
+    )
+    get_db().commit()
+    cursor.close()
+
+    # otpauth:// is the standard URI format every authenticator app reads
+    provisioning_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+        name=email, issuer_name='HandyHub'
+    )
+    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={quote(provisioning_uri)}"
+
+    return jsonify({'secret': secret, 'qr_url': qr_url}), 200
+
+
+@app.route('/api/2fa/verify', methods=['POST'])
+def verify_totp():
+    """
+    Confirm the code from the authenticator app matches the secret from
+    /api/2fa/setup, and only then flip totp_enabled on. This proves the
+    user actually captured a secret their app can reproduce, before we
+    start requiring it at login.
+    """
+    user_id = current_user_id()
+    if user_id is None:
+        return jsonify({'message': 'Unauthorized'}), 401
+
+    code = request.get_json().get('code', '').strip()
+    if not code:
+        return jsonify({'message': 'Code is required'}), 400
+
+    cursor = get_db().cursor()
+    cursor.execute("SELECT totp_secret FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    secret = row[0] if row else None
+
+    if not secret:
+        cursor.close()
+        return jsonify({'message': 'Call /api/2fa/setup first'}), 400
+
+    if not pyotp.TOTP(secret).verify(code, valid_window=1):
+        cursor.close()
+        return jsonify({'message': 'Invalid code'}), 400
+
+    cursor.execute("UPDATE users SET totp_enabled = TRUE WHERE id = %s", (user_id,))
+    get_db().commit()
+    cursor.close()
+
+    return jsonify({'message': '2FA enabled successfully'}), 200
 
 
 if __name__ == '__main__':

@@ -11,17 +11,24 @@ function Login({ setCurrentUser }) {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [needsTotp, setNeedsTotp] = useState(false);
   const [error, setError] = useState('');
 
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const data = await login(email, password);
+      const data = await login(email, password, needsTotp ? totpCode : undefined);
       setCurrentUser({ email: data.email, name: data.name });
       setError('');
       navigate('/Home');
     } catch (err) {
-      setError(err.message || 'Login failed');
+      if (err.data?.requires_totp) {
+        setNeedsTotp(true);
+        setError('');
+      } else {
+        setError(err.message || 'Login failed');
+      }
     }
   };
 
@@ -62,11 +69,36 @@ function Login({ setCurrentUser }) {
               value={password}
               onChange={e => setPassword(e.target.value)}
               size="small"
-              sx={{ mb: 3 }}
+              sx={{ mb: 1 }}
             />
 
+            <Typography
+              variant="body2"
+              onClick={() => navigate('/forgot-password')}
+              sx={{ color: 'secondary.main', cursor: 'pointer', fontWeight: 600, mb: 3, textAlign: 'right' }}
+            >
+              Forgot password?
+            </Typography>
+
+            {needsTotp && (
+              <>
+                <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                  Authentication code
+                </Typography>
+                <TextField
+                  fullWidth
+                  placeholder="6-digit code"
+                  value={totpCode}
+                  onChange={e => setTotpCode(e.target.value)}
+                  size="small"
+                  autoFocus
+                  sx={{ mb: 3 }}
+                />
+              </>
+            )}
+
             <Button fullWidth type="submit" variant="contained" sx={{ py: 1.2, mb: 2 }}>
-              Login
+              {needsTotp ? 'Verify' : 'Login'}
             </Button>
           </form>
 

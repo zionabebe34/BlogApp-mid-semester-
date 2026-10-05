@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { useNavigate } from 'react-router-dom';
-import { getMe, getUserProfile, updateMyBio, getFollowers, getFollowing } from '../api';
+import { getMe, getUserProfile, updateMyBio, getFollowers, getFollowing, setupTotp, verifyTotp } from '../api';
 import { timeAgo } from '../utils/timeAgo';
 import {
   Box, Avatar, Typography, TextField, Button, CircularProgress, Card, CardContent, Divider,
@@ -14,6 +14,12 @@ function MyProfilePage({ currentUser }) {
   const [editing, setEditing] = useState(false);
   const [bioDraft, setBioDraft] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Two-factor authentication state
+  const [twoFaEnabled, setTwoFaEnabled] = useState(false);
+  const [totpSetup, setTotpSetup] = useState(null);   // { secret, qr_url } while enabling
+  const [totpCode, setTotpCode] = useState('');
+  const [totpError, setTotpError] = useState('');
 
   // Followers / following dialog state
   const [dialog, setDialog] = useState(null);   // 'followers' | 'following' | null
@@ -43,6 +49,7 @@ function MyProfilePage({ currentUser }) {
     async function load() {
       try {
         const me = await getMe();              // get our own id from the session
+        setTwoFaEnabled(me.totp_enabled);
         const data = await getUserProfile(me.id);
         setProfile(data);
         setBioDraft(data.bio || '');
@@ -63,6 +70,28 @@ function MyProfilePage({ currentUser }) {
       alert('Could not save bio. Please try again.');
     }
     setSaving(false);
+  };
+
+  const handleStartTotpSetup = async () => {
+    try {
+      const data = await setupTotp();
+      setTotpSetup(data);
+      setTotpError('');
+    } catch (err) {
+      setTotpError(err.message || 'Could not start 2FA setup');
+    }
+  };
+
+  const handleConfirmTotp = async () => {
+    try {
+      await verifyTotp(totpCode);
+      setTwoFaEnabled(true);
+      setTotpSetup(null);
+      setTotpCode('');
+      setTotpError('');
+    } catch (err) {
+      setTotpError(err.message || 'Invalid code');
+    }
   };
 
   if (!profile) {
@@ -138,6 +167,53 @@ function MyProfilePage({ currentUser }) {
               </Typography>
               <Button size="small" onClick={() => setEditing(true)}>Edit Bio</Button>
             </Box>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Two-factor authentication ── */}
+      <Card sx={{ mb: 4 }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 1 }}>Two-Factor Authentication</Typography>
+
+          {twoFaEnabled ? (
+            <Typography sx={{ color: 'success.main' }}>
+              ✓ Enabled — you'll need an authenticator code to log in.
+            </Typography>
+          ) : totpSetup ? (
+            <Box>
+              <Typography variant="body2" sx={{ mb: 2 }}>
+                Scan this with Google Authenticator (or similar), then enter the
+                6-digit code it shows.
+              </Typography>
+              <Box component="img" src={totpSetup.qr_url} alt="2FA QR code" sx={{ mb: 1 }} />
+              <Typography variant="caption" sx={{ display: 'block', mb: 2, color: 'text.secondary' }}>
+                Can't scan? Enter this manually: {totpSetup.secret}
+              </Typography>
+
+              {totpError && (
+                <Typography color="error" sx={{ mb: 1 }}>{totpError}</Typography>
+              )}
+
+              <TextField
+                fullWidth
+                placeholder="6-digit code"
+                value={totpCode}
+                onChange={e => setTotpCode(e.target.value)}
+                size="small"
+                sx={{ mb: 2 }}
+              />
+              <Button variant="contained" onClick={handleConfirmTotp} sx={{ mr: 1 }}>
+                Confirm
+              </Button>
+              <Button variant="text" onClick={() => { setTotpSetup(null); setTotpError(''); }}>
+                Cancel
+              </Button>
+            </Box>
+          ) : (
+            <Button variant="outlined" onClick={handleStartTotpSetup}>
+              Enable 2FA
+            </Button>
           )}
         </CardContent>
       </Card>

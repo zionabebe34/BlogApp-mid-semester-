@@ -82,8 +82,9 @@ class TestLogin:
         password = "testpassword"
         hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-        # Fake user row matching the explicit SELECT: (id, name, password, is_banned)
-        fake_user = (1, "testuser", hashed, False)
+        # Fake user row matching the explicit SELECT:
+        # (id, name, password, is_banned, totp_secret, totp_enabled)
+        fake_user = (1, "testuser", hashed, False, None, False)
 
         mock_cursor = MagicMock()
         mock_db = MagicMock()
@@ -102,6 +103,74 @@ class TestLogin:
         #Assert
         assert response.status_code == 200
         assert b"Login successful" in response.data
+
+    def test_login_requires_totp_when_enabled(self, client):
+        #Arrange - correct password, but 2FA is on and no code was sent
+        password = "testpassword"
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        fake_user = (1, "testuser", hashed, False, 'SOMESECRET', True)
+
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = fake_user
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/login', json={
+                "email": "testuser@example.com", "password": "testpassword"
+            })
+
+        #Assert
+        assert response.status_code == 401
+        assert response.get_json()['requires_totp'] is True
+
+    def test_login_with_valid_totp_code(self, client):
+        #Arrange
+        password = "testpassword"
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        fake_user = (1, "testuser", hashed, False, 'SOMESECRET', True)
+
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = fake_user
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db), \
+             patch('pyotp.TOTP.verify', return_value=True):
+            response = client.post('/api/login', json={
+                "email": "testuser@example.com", "password": "testpassword",
+                "totp_code": "123456",
+            })
+
+        #Assert
+        assert response.status_code == 200
+        assert b"Login successful" in response.data
+
+    def test_login_with_invalid_totp_code(self, client):
+        #Arrange
+        password = "testpassword"
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        fake_user = (1, "testuser", hashed, False, 'SOMESECRET', True)
+
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = fake_user
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db), \
+             patch('pyotp.TOTP.verify', return_value=False):
+            response = client.post('/api/login', json={
+                "email": "testuser@example.com", "password": "testpassword",
+                "totp_code": "000000",
+            })
+
+        #Assert
+        assert response.status_code == 401
+        assert b"Invalid 2FA code" in response.data
+
 
 class TestLogout:
     def test_logout_route(self, client):
@@ -124,7 +193,7 @@ class TestLogout:
 class TestMe:
     def test_me_authorized(self, client):
         #Arrange
-        fake_user = (1, "testuser", "testuser@example.com", "user")
+        fake_user = (1, "testuser", "testuser@example.com", "user", False)
         mock_cursor = MagicMock()
         mock_db = MagicMock()
         mock_db.cursor.return_value = mock_cursor
@@ -585,4 +654,439 @@ class TestComments:
         assert b"Comment content is required" in response.data
 
 
+class TestForgotPassword:
+    def test_forgot_password_known_email(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)  # user exists
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db), \
+             patch.object(server_module, 'send_reset_email') as mock_send:
+            response = client.post('/api/forgot-password', json={"email": "testuser@example.com"})
+
+        #Assert
+        assert response.status_code == 200
+        assert b"If that email exists" in response.data
+        mock_send.assert_called_once()
+
+    def test_forgot_password_unknown_email(self, client):
+        #Arrange - no matching user row
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = None
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db), \
+             patch.object(server_module, 'send_reset_email') as mock_send:
+            response = client.post('/api/forgot-password', json={"email": "nobody@example.com"})
+
+        #Assert - same generic response either way; no enumeration
+        assert response.status_code == 200
+        assert b"If that email exists" in response.data
+        mock_send.assert_not_called()
+
+    def test_forgot_password_empty_email(self, client):
+        #Act - blank email short-circuits before any DB access
+        response = client.post('/api/forgot-password', json={"email": ""})
+
+        #Assert
+        assert response.status_code == 200
+        assert b"If that email exists" in response.data
+
+
+class TestResetPassword:
+    def test_reset_password_valid_token(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (5, 1)  # reset_id, user_id
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/reset-password',
+                                   json={"token": "sometoken", "password": "newpassword123"})
+
+        #Assert
+        assert response.status_code == 200
+        assert b"Password updated successfully" in response.data
+
+    def test_reset_password_invalid_token(self, client):
+        #Arrange - no matching, unused, unexpired row
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = None
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/reset-password',
+                                   json={"token": "badtoken", "password": "newpassword123"})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"invalid or has expired" in response.data
+
+    def test_reset_password_missing_fields(self, client):
+        #Act - no DB touched, the check happens first
+        response = client.post('/api/reset-password', json={"token": "", "password": ""})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"Token and password are required" in response.data
+
+    def test_reset_password_short_password(self, client):
+        #Act
+        response = client.post('/api/reset-password',
+                               json={"token": "sometoken", "password": "abc"})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"at least 6 characters" in response.data
+
+
+class TestReportPost:
+    def test_report_post_authorized(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)  # current_user_id()
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/posts/1/report', json={"reason": "spam"})
+
+        #Assert
+        assert response.status_code == 201
+        assert b"Post reported successfully" in response.data
+
+    def test_report_post_unauthorized(self, client):
+        #Act - no cookie
+        response = client.post('/api/posts/1/report', json={"reason": "spam"})
+
+        #Assert
+        assert response.status_code == 401
+
+    def test_report_post_empty_reason_returns_400(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/posts/1/report', json={"reason": "   "})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"A reason is required" in response.data
+
+    def test_report_post_duplicate_returns_400(self, client):
+        #Arrange - the INSERT raises MySQL error 1062 (duplicate entry)
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        mock_cursor.execute.side_effect = [None, mysql.connector.Error(errno=1062)]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/posts/1/report', json={"reason": "spam"})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"You already reported this post" in response.data
+
+    def test_report_post_missing_post_returns_404(self, client):
+        #Arrange - the INSERT raises MySQL error 1452 (foreign key)
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        mock_cursor.execute.side_effect = [None, mysql.connector.Error(errno=1452)]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/posts/999/report', json={"reason": "spam"})
+
+        #Assert
+        assert response.status_code == 404
+        assert b"Post does not exist" in response.data
+
+
+class TestAdminReports:
+    def test_list_reports_as_admin(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ('admin',)  # current_user_role()
+        mock_cursor.fetchall.return_value = [
+            {'id': 1, 'reason': 'spam', 'status': 'open', 'created_at': None,
+             'post_id': 1, 'post_title': 'Bad post', 'author_id': 2,
+             'author_name': 'author', 'reporter_name': 'reporter'}
+        ]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.get('/api/admin/reports')
+
+        #Assert
+        assert response.status_code == 200
+        assert b"Bad post" in response.data
+
+    def test_list_reports_forbidden_for_regular_user(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ('user',)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.get('/api/admin/reports')
+
+        #Assert
+        assert response.status_code == 403
+
+    def test_list_reports_unauthorized(self, client):
+        #Act - no cookie, current_user_role() returns None before touching the DB
+        response = client.get('/api/admin/reports')
+
+        #Assert
+        assert response.status_code == 401
+
+    def test_admin_delete_post_as_admin(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ('admin',)
+        mock_cursor.rowcount = 1
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.delete('/api/admin/posts/1')
+
+        #Assert
+        assert response.status_code == 200
+        assert b"Post deleted successfully" in response.data
+
+    def test_admin_delete_post_not_found(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ('admin',)
+        mock_cursor.rowcount = 0
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.delete('/api/admin/posts/999')
+
+        #Assert
+        assert response.status_code == 404
+
+    def test_update_report_status_valid(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ('moderator',)
+        mock_cursor.rowcount = 1
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.put('/api/admin/reports/1', json={"status": "resolved"})
+
+        #Assert
+        assert response.status_code == 200
+        assert b"Report marked as resolved" in response.data
+
+    def test_update_report_status_invalid_value_returns_400(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ('moderator',)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.put('/api/admin/reports/1', json={"status": "banana"})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"Status must be" in response.data
+
+
+class TestBanUser:
+    def test_ban_user_as_admin(self, client):
+        #Arrange - first fetchone is the role check, second is current_user_id()
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.side_effect = [('admin',), (1,)]
+        mock_cursor.rowcount = 1
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/admin/users/2/ban')
+
+        #Assert
+        assert response.status_code == 200
+        assert b"User banned successfully" in response.data
+
+    def test_ban_self_returns_400(self, client):
+        #Arrange - the logged-in admin (id=1) targets their own id
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.side_effect = [('admin',), (1,)]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/admin/users/1/ban')
+
+        #Assert
+        assert response.status_code == 400
+        assert b"You cannot ban yourself" in response.data
+
+    def test_ban_user_forbidden_for_moderator(self, client):
+        #Arrange - ban_user is admin-only, unlike the report routes
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ('moderator',)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/admin/users/2/ban')
+
+        #Assert
+        assert response.status_code == 403
+
+    def test_unban_user_as_admin(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ('admin',)
+        mock_cursor.rowcount = 1
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/admin/users/2/unban')
+
+        #Assert
+        assert response.status_code == 200
+        assert b"User unbanned successfully" in response.data
+
+
+class TestSetupTotp:
+    def test_setup_totp_authorized(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ('testuser@example.com',)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/2fa/setup')
+
+        #Assert
+        assert response.status_code == 200
+        data = response.get_json()
+        assert 'secret' in data and len(data['secret']) > 0
+        assert data['qr_url'].startswith('https://api.qrserver.com/')
+
+    def test_setup_totp_unauthorized(self, client):
+        #Act - no cookie
+        response = client.post('/api/2fa/setup')
+
+        #Assert
+        assert response.status_code == 401
+
+
+class TestVerifyTotp:
+    def test_verify_totp_valid_code(self, client):
+        #Arrange - first fetchone() is current_user_id()'s lookup, second
+        # is verify_totp's own totp_secret lookup.
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.side_effect = [(1,), ('SOMESECRET',)]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db), \
+             patch('pyotp.TOTP.verify', return_value=True):
+            response = client.post('/api/2fa/verify', json={"code": "123456"})
+
+        #Assert
+        assert response.status_code == 200
+        assert b"2FA enabled successfully" in response.data
+
+    def test_verify_totp_invalid_code(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.side_effect = [(1,), ('SOMESECRET',)]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db), \
+             patch('pyotp.TOTP.verify', return_value=False):
+            response = client.post('/api/2fa/verify', json={"code": "000000"})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"Invalid code" in response.data
+
+    def test_verify_totp_no_secret_yet(self, client):
+        #Arrange - user never called /setup, so totp_secret is NULL.
+        # First fetchone() is current_user_id()'s own lookup, second is
+        # the totp_secret lookup inside verify_totp itself.
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.side_effect = [(1,), (None,)]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/2fa/verify', json={"code": "123456"})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"setup first" in response.data
+
+    def test_verify_totp_unauthorized(self, client):
+        #Act - no cookie
+        response = client.post('/api/2fa/verify', json={"code": "123456"})
+
+        #Assert
+        assert response.status_code == 401
 

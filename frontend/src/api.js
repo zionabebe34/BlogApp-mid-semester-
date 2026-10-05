@@ -23,7 +23,9 @@ async function request(path, { method = 'GET', body } = {}) {
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.message || data?.error || 'Request failed');
+    const error = new Error(data?.message || data?.error || 'Request failed');
+    error.data = data;
+    throw error;
   }
   return data;
 }
@@ -33,13 +35,19 @@ async function request(path, { method = 'GET', body } = {}) {
 export const signup = (name, email, password) =>
   request('/api/signup', { method: 'POST', body: { name, email, password } });
 
-export const login = (email, password) =>
-  request('/api/login', { method: 'POST', body: { email, password } });
+export const login = (email, password, totpCode) =>
+  request('/api/login', { method: 'POST', body: { email, password, totp_code: totpCode } });
 
 export const logout = () => request('/api/logout', { method: 'POST' });
 
 /** Who is currently logged in? Throws if nobody is. */
 export const getMe = () => request('/api/me');
+
+export const forgotPassword = (email) =>
+  request('/api/forgot-password', { method: 'POST', body: { email } });
+
+export const resetPassword = (token, password) =>
+  request('/api/reset-password', { method: 'POST', body: { token, password } });
 
 // ── Profile ──────────────────────────────────────────────────────────────────
 
@@ -125,3 +133,10 @@ export const banUser = (userId) =>
 
 export const unbanUser = (userId) =>
   request(`/api/admin/users/${userId}/unban`, { method: 'POST' });
+
+// ── 2FA ──────────────────────────────────────────────────────────────────────
+
+export const setupTotp = () => request('/api/2fa/setup', { method: 'POST' });
+
+export const verifyTotp = (code) =>
+  request('/api/2fa/verify', { method: 'POST', body: { code } });
