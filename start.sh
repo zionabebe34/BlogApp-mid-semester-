@@ -124,6 +124,17 @@ CREATE TABLE IF NOT EXISTS reports (
     UNIQUE KEY unique_report (post_id, reporter_id)
 );
 
+CREATE TABLE IF NOT EXISTS messages (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    sender_id    INT      NOT NULL,
+    recipient_id INT      NOT NULL,
+    content      TEXT     NOT NULL,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    read_at      DATETIME NULL,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- Add `role` to databases created before this column existed.
 -- MySQL has no "ADD COLUMN IF NOT EXISTS", so we check information_schema first.
 SET @col_exists = (

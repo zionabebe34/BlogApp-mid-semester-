@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
 import { getMe } from './api';
 import TopBar from './components/TopBar';
 import Feed from './pages/Feed';
 import UsersPage from './pages/UsersPage';
 import UserPostsPage from './pages/UserPostsPage';
 import MyProfilePage from './pages/MyProfilePage';
+import Messages from './pages/Messages';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import ForgotPassword from './pages/ForgotPassword';
@@ -27,12 +29,25 @@ import AdminPage from './pages/AdminPage';
  */
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
     getMe()
       .then(setCurrentUser)
-      .catch(() => setCurrentUser(null)); // not logged in — that's fine
+      .catch(() => setCurrentUser(null)) // not logged in — that's fine
+      .finally(() => setCheckingAuth(false));
   }, []);
+
+  // Don't render any route guards until we know whether we're logged in —
+  // otherwise a direct page load/refresh briefly sees currentUser as null
+  // and bounces a logged-in user to /Login before getMe() resolves.
+  if (checkingAuth) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 12 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <>
@@ -47,6 +62,14 @@ function App() {
           <Route
             path="/profile"
             element={currentUser ? <MyProfilePage currentUser={currentUser} /> : <Navigate to="/Login" />}
+          />
+          <Route
+            path="/messages"
+            element={currentUser ? <Messages currentUser={currentUser} /> : <Navigate to="/Login" />}
+          />
+          <Route
+            path="/messages/:userId"
+            element={currentUser ? <Messages currentUser={currentUser} /> : <Navigate to="/Login" />}
           />
           <Route path="/Login" element={<Login setCurrentUser={setCurrentUser} />} />
           <Route path="/Signup" element={<Signup />} />

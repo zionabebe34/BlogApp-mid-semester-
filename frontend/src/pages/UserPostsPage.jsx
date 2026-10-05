@@ -74,16 +74,23 @@ const UserPostsPage = ({ currentUser }) => {
               </Typography>
             </Box>
 
-            {/* No follow button on your own profile */}
+            {/* No follow/message buttons on your own profile */}
             {!isOwnProfile && (
-              <Button
-                variant={profile.is_following ? 'outlined' : 'contained'}
-                onClick={handleFollowToggle}
-                disabled={!currentUser}
-                title={!currentUser ? 'Log in to follow authors' : ''}
-              >
-                {!currentUser ? 'Log in to follow' : profile.is_following ? 'Unfollow' : 'Follow'}
-              </Button>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                {currentUser && (
+                  <Button variant="outlined" onClick={() => navigate(`/messages/${userId}`)}>
+                    Message
+                  </Button>
+                )}
+                <Button
+                  variant={profile.is_following ? 'outlined' : 'contained'}
+                  onClick={handleFollowToggle}
+                  disabled={!currentUser}
+                  title={!currentUser ? 'Log in to follow authors' : ''}
+                >
+                  {!currentUser ? 'Log in to follow' : profile.is_following ? 'Unfollow' : 'Follow'}
+                </Button>
+              </Box>
             )}
           </Box>
         </CardContent>

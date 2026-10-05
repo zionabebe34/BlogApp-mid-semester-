@@ -2,6 +2,7 @@ import pytest
 import bcrypt
 import sys
 import mysql.connector
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 sys.modules.pop('server', None)
@@ -1089,4 +1090,170 @@ class TestVerifyTotp:
 
         #Assert
         assert response.status_code == 401
+
+
+class TestConversations:
+    def test_get_conversations_authorized(self, client):
+        #Arrange - two messages from two different senders, one unread one read
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)  # current_user_id()
+        mock_cursor.fetchall.side_effect = [
+            [
+                {'sender_id': 2, 'recipient_id': 1, 'content': 'Hi there',
+                 'created_at': datetime(2026, 1, 2), 'read_at': None},
+                {'sender_id': 1, 'recipient_id': 3, 'content': 'Hey',
+                 'created_at': datetime(2026, 1, 1), 'read_at': datetime(2026, 1, 1)},
+            ],
+            [
+                {'id': 2, 'name': 'Bob', 'profile_picture_url': ''},
+                {'id': 3, 'name': 'Carol', 'profile_picture_url': ''},
+            ],
+        ]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.get('/api/conversations')
+
+        #Assert
+        assert response.status_code == 200
+        data = response.get_json()
+        assert len(data) == 2
+        bob = next(c for c in data if c['user_id'] == 2)
+        assert bob['unread_count'] == 1
+        assert bob['last_message'] == 'Hi there'
+
+    def test_get_conversations_unauthorized(self, client):
+        #Act - no cookie
+        response = client.get('/api/conversations')
+
+        #Assert
+        assert response.status_code == 401
+
+    def test_get_conversations_empty(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        mock_cursor.fetchall.return_value = []
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.get('/api/conversations')
+
+        #Assert
+        assert response.status_code == 200
+        assert response.get_json() == []
+
+
+class TestGetMessages:
+    def test_get_messages_authorized(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)  # current_user_id()
+        mock_cursor.fetchall.return_value = [
+            {'id': 1, 'sender_id': 1, 'recipient_id': 2, 'content': 'Hi',
+             'created_at': datetime(2026, 1, 1), 'read_at': None},
+        ]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.get('/api/messages/2')
+
+        #Assert
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data[0]['content'] == 'Hi'
+        assert data[0]['created_at'] == '2026-01-01T00:00:00'
+        assert data[0]['read_at'] is None
+
+    def test_get_messages_unauthorized(self, client):
+        #Act - no cookie
+        response = client.get('/api/messages/2')
+
+        #Assert
+        assert response.status_code == 401
+
+
+class TestSendMessage:
+    def test_send_message_authorized(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/messages/2', json={"content": "Hey there"})
+
+        #Assert
+        assert response.status_code == 201
+        assert b"Message sent successfully" in response.data
+
+    def test_send_message_unauthorized(self, client):
+        #Act - no cookie
+        response = client.post('/api/messages/2', json={"content": "Hey there"})
+
+        #Assert
+        assert response.status_code == 401
+
+    def test_send_message_to_self_returns_400(self, client):
+        #Arrange - logged-in user id=1, trying to message user id=1
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/messages/1', json={"content": "Hey there"})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"You cannot message yourself" in response.data
+
+    def test_send_message_empty_content_returns_400(self, client):
+        #Arrange
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/messages/2', json={"content": "   "})
+
+        #Assert
+        assert response.status_code == 400
+        assert b"Message content is required" in response.data
+
+    def test_send_message_recipient_not_found_returns_404(self, client):
+        #Arrange - first execute() is current_user_id()'s own lookup (must
+        # succeed); the second is the INSERT, which raises MySQL error 1452
+        # (foreign key) because the recipient doesn't exist.
+        mock_cursor = MagicMock()
+        mock_db = MagicMock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (1,)
+        mock_cursor.execute.side_effect = [None, mysql.connector.Error(errno=1452)]
+        client.set_cookie('session_id', 'fake-session-id')
+
+        #Act
+        with patch.object(server_module, 'get_db', return_value=mock_db):
+            response = client.post('/api/messages/999', json={"content": "Hey there"})
+
+        #Assert
+        assert response.status_code == 404
+        assert b"User does not exist" in response.data
 

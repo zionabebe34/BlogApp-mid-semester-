@@ -1010,6 +1010,134 @@ def add_comment(post_id):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Direct messaging routes
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/conversations', methods=['GET'])
+def get_conversations():
+    """
+    One row per person I've exchanged messages with, newest first, with
+    their latest message and how many of their messages I haven't read yet.
+    """
+    user_id = current_user_id()
+    if user_id is None:
+        return jsonify({'message': 'Unauthorized'}), 401
+
+    cursor = get_db().cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT sender_id, recipient_id, content, created_at, read_at
+        FROM messages
+        WHERE sender_id = %s OR recipient_id = %s
+        ORDER BY created_at DESC
+        """,
+        (user_id, user_id),
+    )
+    rows = cursor.fetchall()
+
+    # Group by "the other person" — the first row we see for each one is
+    # their newest message, since we already sorted by created_at DESC.
+    conversations = {}
+    for row in rows:
+        other_id = row['recipient_id'] if row['sender_id'] == user_id else row['sender_id']
+        if other_id not in conversations:
+            conversations[other_id] = {
+                'user_id': other_id,
+                'last_message': row['content'],
+                'last_message_at': row['created_at'],
+                'unread_count': 0,
+            }
+        if row['sender_id'] == other_id and row['read_at'] is None:
+            conversations[other_id]['unread_count'] += 1
+
+    # Attach each partner's name/avatar in one extra query
+    if conversations:
+        other_ids = list(conversations.keys())
+        placeholders = ','.join(['%s'] * len(other_ids))
+        cursor.execute(
+            f"SELECT id, name, profile_picture_url FROM users WHERE id IN ({placeholders})",
+            other_ids,
+        )
+        for user in cursor.fetchall():
+            conversations[user['id']]['name'] = user['name']
+            conversations[user['id']]['profile_picture_url'] = user['profile_picture_url']
+    cursor.close()
+
+    result = sorted(conversations.values(), key=lambda c: c['last_message_at'], reverse=True)
+    for c in result:
+        c['last_message_at'] = c['last_message_at'].isoformat()
+
+    return jsonify(result), 200
+
+
+@app.route('/api/messages/<int:other_id>', methods=['GET'])
+def get_messages(other_id):
+    """
+    The full thread between me and one other user, oldest first (reading
+    order). Marks their unread messages to me as read, since opening the
+    thread is how you "read" them.
+    """
+    user_id = current_user_id()
+    if user_id is None:
+        return jsonify({'message': 'Unauthorized'}), 401
+
+    cursor = get_db().cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT id, sender_id, recipient_id, content, created_at, read_at
+        FROM messages
+        WHERE (sender_id = %s AND recipient_id = %s)
+           OR (sender_id = %s AND recipient_id = %s)
+        ORDER BY created_at ASC
+        """,
+        (user_id, other_id, other_id, user_id),
+    )
+    messages = cursor.fetchall()
+    for m in messages:
+        m['created_at'] = m['created_at'].isoformat() if m['created_at'] else None
+        m['read_at'] = m['read_at'].isoformat() if m['read_at'] else None
+
+    # Opening the thread marks their messages to me as read
+    cursor.execute(
+        "UPDATE messages SET read_at = NOW() WHERE sender_id = %s AND recipient_id = %s AND read_at IS NULL",
+        (other_id, user_id),
+    )
+    get_db().commit()
+    cursor.close()
+
+    return jsonify(messages), 200
+
+
+@app.route('/api/messages/<int:other_id>', methods=['POST'])
+def send_message(other_id):
+    """Send a message to another user."""
+    user_id = current_user_id()
+    if user_id is None:
+        return jsonify({'message': 'Unauthorized'}), 401
+
+    if other_id == user_id:
+        return jsonify({'message': 'You cannot message yourself'}), 400
+
+    content = request.get_json().get('content', '').strip()
+    if not content:
+        return jsonify({'message': 'Message content is required'}), 400
+
+    try:
+        cursor = get_db().cursor()
+        cursor.execute(
+            "INSERT INTO messages (sender_id, recipient_id, content) VALUES (%s, %s, %s)",
+            (user_id, other_id, content),
+        )
+        get_db().commit()
+        cursor.close()
+        return jsonify({'message': 'Message sent successfully'}), 201
+    except mysql.connector.Error as err:
+        if err.errno == ERR_FOREIGN_KEY:
+            return jsonify({'message': 'User does not exist'}), 404
+        return jsonify({'message': 'Database error occurred'}), 500
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # 2FA routes (TOTP)
 # ═════════════════════════════════════════════════════════════════════════════
 

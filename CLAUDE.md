@@ -24,7 +24,7 @@ with Python/SQL and weaker on React. Therefore:
 
 ```
 backend/
-  server.py                 all routes (single file, ~750 lines)
+  server.py                 all routes (single file, ~1200 lines)
   seed.py                   fake data from jsonplaceholder + DiceBear
   test_auth.py              unit tests (mocked DB)
   test_auth_integration.py  integration tests (real DB)
@@ -37,7 +37,7 @@ frontend/src/
   api.js                    every backend call; nothing else uses fetch()
   components/SinglePost.jsx post card: likes, comments dialog, report flag
   pages/                    Feed, Login, Signup, ForgotPassword, ResetPassword,
-                             AdminPage, profiles…
+                             Messages, AdminPage, profiles…
   Dockerfile                frontend image (runs `vite --host` dev server)
 start.sh                    creates DB + tables, seeds, starts both servers
 docker-compose.yml          db + backend + frontend, for containerized run
@@ -85,11 +85,15 @@ Source: `finalProject.pdf`. Section 1 (mid-semester) is complete.
 
 ### Section 3 — Optional (must deliver 3 of 6). Chosen (finalized 2026-09-24):
 
-1. **Direct Messaging** — private chat between users — ❌ not started
+1. **Direct Messaging** — private chat between users — ✅ done, verified end-to-end
+   (conversations list, thread, send/receive, read receipts, 4s polling, all via
+   `/api/conversations` + `/api/messages/<id>` and `pages/Messages.jsx`)
 2. **2FA (TOTP)** — not OAuth; Zion picked 2FA only, OAuth is not required — ✅ done,
    verified end-to-end (enable flow on `MyProfilePage`, login gate in `Login.jsx`)
 3. **Containerization** — Dockerfile + docker-compose — ✅ done, verified end-to-end
    (signup writes to DB through the container network, feed reads back correctly)
+
+**All three Section 3 requirements are now complete.**
 
 Not chosen (available but dropped): Responsive Design, OAuth (Google) login,
 Recommendation Engine / Trending Topics.
@@ -112,8 +116,9 @@ Recommendation Engine / Trending Topics.
    background scheduler (APScheduler was the plan) that posts and replies
    continuously.
 
-4. **The last remaining optional requirement: Direct Messaging**, then AWS
-   deployment last.
+4. **AWS deployment**, once the above is done. Section 3 is fully complete,
+   so nothing optional is left — only Section 2's LLM-dependent items (2.c,
+   2.d, 2.e.iii) and deployment remain.
 
 ## Known issues (deliberately deferred)
 

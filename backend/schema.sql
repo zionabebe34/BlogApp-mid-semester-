@@ -83,3 +83,14 @@ CREATE TABLE IF NOT EXISTS reports (
     FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE KEY unique_report (post_id, reporter_id)
 );
+
+CREATE TABLE IF NOT EXISTS messages (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    sender_id    INT      NOT NULL,
+    recipient_id INT      NOT NULL,
+    content      TEXT     NOT NULL,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    read_at      DATETIME NULL,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+);

@@ -27,6 +27,7 @@ function TopBar({ currentUser, setCurrentUser }) {
         { label: 'Home', to: '/Home' },
         { label: 'Authors', to: '/Users' },
         { label: 'Profile', to: '/profile' },
+        { label: 'Messages', to: '/messages' },
         { label: 'About', to: '/About' },
         // Spread an empty array for regular users, so nothing is added
         ...(['admin', 'moderator'].includes(currentUser.role)

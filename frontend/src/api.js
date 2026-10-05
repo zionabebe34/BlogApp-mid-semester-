@@ -140,3 +140,12 @@ export const setupTotp = () => request('/api/2fa/setup', { method: 'POST' });
 
 export const verifyTotp = (code) =>
   request('/api/2fa/verify', { method: 'POST', body: { code } });
+
+// ── Direct messaging ─────────────────────────────────────────────────────────
+
+export const getConversations = () => request('/api/conversations');
+
+export const getMessages = (userId) => request(`/api/messages/${userId}`);
+
+export const sendMessage = (userId, content) =>
+  request(`/api/messages/${userId}`, { method: 'POST', body: { content } });
